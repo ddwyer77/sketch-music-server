@@ -1,6 +1,6 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits } from 'discord.js';
-import { db } from './firebaseAdmin.js';
+import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { db, FieldValue } from './firebaseAdmin.js';
 import crypto from 'crypto';
 
 const TOKEN_EXPIRY = 1000 * 60 * 15; // 15 minutes
@@ -13,6 +13,25 @@ const client = new Client({
 });
 
 const baseUrl = process.env.BOT_LOGIN_REDIRECT_URL || 'http://localhost:3000/auth/discord-login';
+
+// Helper function to get Firebase user ID from Discord ID
+async function getFirebaseUserId(discordId) {
+    try {
+        const userDoc = await db.collection('users')
+            .where('discord_id', '==', discordId)
+            .limit(1)
+            .get();
+        
+        if (userDoc.empty) {
+            return null;
+        }
+        
+        return userDoc.docs[0].id;
+    } catch (error) {
+        console.error('Error getting Firebase user ID:', error);
+        return null;
+    }
+}
 
 // Rate limiting function
 const isRateLimited = (userId) => {
@@ -51,8 +70,120 @@ const cleanupExpiredTokens = async () => {
 // Run cleanup every hour
 setInterval(cleanupExpiredTokens, 1000 * 60 * 60);
 
-client.once('ready', () => {
+client.once('ready', async () => {
     console.log(`Bot is online as ${client.user.tag}`);
+    
+    // Register slash commands
+    const commands = [
+        new SlashCommandBuilder()
+            .setName('add')
+            .setDescription('Add a video to a campaign')
+            .addStringOption(option =>
+                option.setName('campaign_id')
+                    .setDescription('The campaign ID')
+                    .setRequired(true))
+            .addStringOption(option =>
+                option.setName('video_url')
+                    .setDescription('The URL of the video to add')
+                    .setRequired(true))
+    ];
+
+    try {
+        if (!process.env.DISCORD_CLIENT_ID) {
+            throw new Error('DISCORD_CLIENT_ID is not set in environment variables');
+        }
+
+        const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN);
+        
+        // Get the first guild the bot is in
+        const guilds = await client.guilds.fetch();
+        const firstGuild = guilds.first();
+        
+        if (!firstGuild) {
+            throw new Error('Bot is not in any guilds');
+        }
+
+        console.log(`Registering commands for guild: ${firstGuild.name}`);
+        
+        // Register commands to the specific guild
+        await rest.put(
+            Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID, firstGuild.id),
+            { body: commands }
+        );
+        
+        console.log('Successfully registered slash commands');
+    } catch (error) {
+        console.error('Error registering slash commands:', error);
+        console.error('Full error details:', {
+            message: error.message,
+            code: error.code,
+            stack: error.stack
+        });
+        
+        if (error.message.includes('DISCORD_CLIENT_ID')) {
+            console.error('Please set DISCORD_CLIENT_ID in your .env file');
+        }
+    }
+});
+
+// Handle slash commands
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isCommand()) return;
+
+    if (interaction.commandName === 'add') {
+        const discordId = interaction.user.id;
+        
+        if (isRateLimited(discordId)) {
+            return interaction.reply({ content: 'Please wait a moment before trying again.', ephemeral: true });
+        }
+
+        const firebaseUserId = await getFirebaseUserId(discordId);
+        if (!firebaseUserId) {
+            return interaction.reply({ 
+                content: 'You need to link your Discord account first. Use the !login command.', 
+                ephemeral: true 
+            });
+        }
+
+        const campaignId = interaction.options.getString('campaign_id');
+        const videoUrl = interaction.options.getString('video_url');
+
+        try {
+            const campaignRef = db.collection('campaigns').doc(campaignId);
+            const campaign = await campaignRef.get();
+
+            if (!campaign.exists) {
+                return interaction.reply({ 
+                    content: 'Campaign not found.', 
+                    ephemeral: true 
+                });
+            }
+
+            const now = Date.now();
+            const videoData = {
+                author_id: firebaseUserId,
+                created_at: now,
+                status: 'pending',
+                updated_at: now,
+                url: videoUrl
+            };
+
+            await campaignRef.update({
+                videos: FieldValue.arrayUnion(videoData)
+            });
+
+            return interaction.reply({ 
+                content: 'Video added successfully!', 
+                ephemeral: true 
+            });
+        } catch (error) {
+            console.error('Error adding video:', error);
+            return interaction.reply({ 
+                content: 'There was an error adding your video. Please try again.', 
+                ephemeral: true 
+            });
+        }
+    }
 });
 
 client.on('messageCreate', async (message) => {
@@ -103,74 +234,7 @@ client.on('messageCreate', async (message) => {
     }
 
 
-        if (message.content === '!test') {
-            try {
-                const discordId = message.author.id;
-                console.log('Test command received from Discord ID:', discordId);
-
-                // 1. Find user by discord_id
-                console.log('Searching for user with discord_id:', discordId);
-                const userQuery = await db.collection('users')
-                    .where('discord_id', '==', discordId)
-                    .limit(1)
-                    .get();
-
-                console.log('Query results:', {
-                    empty: userQuery.empty,
-                    size: userQuery.size,
-                    docs: userQuery.docs.map(doc => ({
-                        id: doc.id,
-                        data: doc.data()
-                    }))
-                });
-
-                // 2. Check if user exists
-                if (userQuery.empty) {
-                    console.log('No user found with this Discord ID');
-                    return message.reply('Please login first using !login');
-                }
-
-                // 3. Get the user document
-                const userDoc = userQuery.docs[0];
-                const userData = userDoc.data();
-                console.log('Found user document:', {
-                    id: userDoc.id,
-                    data: userData
-                });
-
-                // 4. Get current groups or initialize empty array
-                const currentGroups = userData.groups || [];
-                console.log('Current groups:', currentGroups);
-
-                // 5. Check if user is already in the test group
-                if (currentGroups.includes('testGroup')) {
-                    console.log('User already in testGroup');
-                    return message.reply('You are already in the test group!');
-                }
-
-                // 6. Add to groups array
-                const updatedGroups = [...currentGroups, 'testGroup'];
-                console.log('Updated groups array:', updatedGroups);
-
-                // 7. Update the user's document
-                console.log('Updating user document with new groups');
-                await userDoc.ref.update({
-                    groups: updatedGroups
-                });
-
-                console.log('Update successful');
-                return message.reply('Test Successful. Added to Group "TEST Group"');
-
-            } catch (error) {
-                console.error('Error in test command:', error);
-                console.error('Error details:', {
-                    code: error.code,
-                    message: error.message,
-                    stack: error.stack
-                });
-                return message.reply('Sorry, there was an error processing the test command. Please try again.');
-            }
-        }
+        
 });
 
 client.login(process.env.DISCORD_BOT_TOKEN);
