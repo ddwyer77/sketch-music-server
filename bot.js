@@ -2,6 +2,20 @@ import 'dotenv/config';
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'discord.js';
 import { db, FieldValue } from './firebaseAdmin.js';
 import crypto from 'crypto';
+import express from 'express';
+
+const app = express();
+const port = process.env.PORT || 8080;
+
+// Health check endpoint
+app.get('/', (req, res) => {
+    res.status(200).send('Bot is running!');
+});
+
+// Start the server
+app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+});
 
 const TOKEN_EXPIRY = 1000 * 60 * 15; // 15 minutes
 const RATE_LIMIT_WINDOW = 1000 * 60; // 1 minute
@@ -12,7 +26,7 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-const baseUrl = process.env.BOT_LOGIN_REDIRECT_URL || 'http://localhost:3000/auth/discord-login';
+const baseUrl = process.env.BOT_LOGIN_REDIRECT_URL;
 
 // Helper function to get Firebase user ID from Discord ID
 async function getFirebaseUserId(discordId) {
