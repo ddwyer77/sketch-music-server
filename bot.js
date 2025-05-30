@@ -238,15 +238,21 @@ client.on('interactionCreate', async interaction => {
                 return interaction.reply({
                     content: 'It looks like you are already logged out. Log in with /login.',
                     flags: MessageFlags.Ephemeral 
-                })
+                });
             }
 
-            const tokenQuery = await db.collection('discord_login_tokens')
+            // Find the user document with this Discord ID
+            const userQuery = await db.collection('users')
                 .where('discord_id', '==', sanitizeDiscordId(discordId))
+                .limit(1)
                 .get();
-            const batch = db.batch();
-            tokenQuery.forEach(doc => batch.delete(doc.ref));
-            await batch.commit();
+
+            if (!userQuery.empty) {
+                // Remove the Discord ID from the user document
+                await userQuery.docs[0].ref.update({
+                    discord_id: FieldValue.delete()
+                });
+            }
 
             await interaction.reply({ content: 'You have been logged out.', flags: MessageFlags.Ephemeral});
         } catch (error) {
