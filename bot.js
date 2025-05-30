@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, MessageFlags } from 'discord.js';
+import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, MessageFlags, EmbedBuilder } from 'discord.js';
 import { db, FieldValue } from './firebaseAdmin.js';
 import { 
     isUserAuthenticated, 
@@ -113,8 +113,8 @@ client.once('ready', async () => {
     // Register slash commands
     const commands = [
         new SlashCommandBuilder()
-            .setName('add')
-            .setDescription('Add a video to a campaign')
+            .setName('submit')
+            .setDescription('Submit a video to a campaign')
             .addStringOption(option =>
                 option.setName('campaign_id')
                     .setDescription('The campaign ID')
@@ -135,10 +135,6 @@ client.once('ready', async () => {
         new SlashCommandBuilder()
             .setName('campaigns')
             .setDescription('List current campaigns assigned to your server.')
-            .addStringOption(option =>
-                option.setName('server_id')
-                    .setDescription('The ID of your current server. Use "/status" to see this ID.')
-                    .setRequired(true))
     ];
 
     try {
@@ -151,7 +147,7 @@ client.once('ready', async () => {
         // Get the first guild the bot is in
         const guilds = await client.guilds.fetch();
         const firstGuild = guilds.first();
-        
+        1377467566666027130
         if (!firstGuild) {
             throw new Error('Bot is not in any guilds');
         }
@@ -271,8 +267,8 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // ADD COMMAND
-    if (interaction.commandName === 'add') {
+    // SUBMIT COMMAND
+    if (interaction.commandName === 'submit') {
         try {
             // Check if user is authenticated
             const isAuthenticated = await isUserAuthenticated(discordId);
@@ -338,7 +334,49 @@ client.on('interactionCreate', async interaction => {
 
     // CAMPAIGNS COMMAND
     if (interaction.commandName === 'campaigns') {
+        const isAuthenticated = await isUserAuthenticated(discordId);
+        if (!isAuthenticated) {
+            return interaction.reply({
+                content: 'Please log in to view campaigns with the /login command.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        const serverId = interaction.guildId;
+        const campaignsSnapshot = await db
+            .collection('campaigns')
+            .where('serverIds', 'array-contains', serverId)
+            .limit(10)
+            .get();
+
+        if (campaignsSnapshot.empty) {
+            return interaction.reply({
+                content: 'No campaigns found for this server. Please contact the server admin for more information.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
         
+        const embeds = campaignsSnapshot.docs.map(doc => {
+            const data = doc.data();
+            const embed = new EmbedBuilder()
+                .setTitle(data.name || 'Untitled Campaign')
+                .setDescription(`**ID:** \`${doc.id}\``)
+                .setImage(data.imageUrl);
+            // if (data.imageUrl) embed.setImage(data.imageUrl);
+            return embed;
+        })
+
+        const seeAllNote = `Don't see what you're looking for? To see all campaigns, [click here](${process.env.FRONTEND_BASE_URL}/campaigns?serverId=${serverId}).`;
+
+        return interaction.reply({
+            content: seeAllNote,
+            embeds,
+            flags: MessageFlags.Ephemeral 
+        });
+    }
+
+    if (interaction.commandName === 'commands') {
+
     }
 });
 
