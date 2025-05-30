@@ -132,6 +132,13 @@ client.once('ready', async () => {
         new SlashCommandBuilder()
             .setName('status')
             .setDescription('Check if you are logged in'),
+        new SlashCommandBuilder()
+            .setName('campaigns')
+            .setDescription('List current campaigns assigned to your server.')
+            .addStringOption(option =>
+                option.setName('server_id')
+                    .setDescription('The ID of your current server. Use "/status" to see this ID.')
+                    .setRequired(true))
     ];
 
     try {
@@ -218,7 +225,7 @@ client.on('interactionCreate', async interaction => {
         try {
             const isAuthenticated = await isUserAuthenticated(discordId);
             return interaction.reply({
-                content: `**Username:** \`${interaction.user.username}\`\n**Logged In:** \`${isAuthenticated}\``,
+                content: `**Username:** \`${interaction.user.username}\`\n**Logged In:** \`${isAuthenticated}\`\n**Server ID:** \`${interaction.guildId}\``,
                 flags: MessageFlags.Ephemeral
             });
         } catch (error) {
@@ -327,6 +334,11 @@ client.on('interactionCreate', async interaction => {
                 flags: MessageFlags.Ephemeral
             });
         }
+    }
+
+    // CAMPAIGNS COMMAND
+    if (interaction.commandName === 'campaigns') {
+        
     }
 });
 
