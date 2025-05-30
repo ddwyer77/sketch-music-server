@@ -223,8 +223,20 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'status') {
         try {
             const isAuthenticated = await isUserAuthenticated(discordId);
+            let email = null;
+            const firebaseUserId = await getFirebaseUserId(discordId);
+            if (firebaseUserId) {
+                const userDoc = await db.collection('users').doc(firebaseUserId).get();
+                if (userDoc.exists) {
+                    email = userDoc.data().email || null;
+                }
+            }
+            let content = `**Username:** \`${interaction.user.username}\`\n**Logged In:** \`${isAuthenticated}\`\n**Server ID:** \`${interaction.guildId}\``;
+            if (email) {
+                content += `\n**Email:** \`${email}\``;
+            }
             return interaction.reply({
-                content: `**Username:** \`${interaction.user.username}\`\n**Logged In:** \`${isAuthenticated}\`\n**Server ID:** \`${interaction.guildId}\``,
+                content,
                 flags: MessageFlags.Ephemeral
             });
         } catch (error) {
