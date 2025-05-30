@@ -42,16 +42,14 @@ function sanitizeCampaignId(campaignId) {
 export async function isUserAuthenticated(discordId) {
     try {
         const sanitizedDiscordId = sanitizeDiscordId(discordId);
-        const tokenDoc = await db.collection('discord_login_tokens')
+        const userDoc = await db.collection('users')
             .where('discord_id', '==', sanitizedDiscordId)
-            .where('used', '==', true)
-            .where('expires_at', '>', Date.now())
             .limit(1)
             .get();
         
-        return !tokenDoc.empty;
+        return !userDoc.empty;
     } catch (error) {
-        console.error('Error checking user authentication:', error);
+        console.error('Error checking authentication:', error);
         return false;
     }
 }

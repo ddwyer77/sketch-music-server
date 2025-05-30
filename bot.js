@@ -12,13 +12,63 @@ import {
 } from './helper.js';
 import crypto from 'crypto';
 import express from 'express';
+import cors from 'cors';
 
 const app = express();
 const port = process.env.PORT || 8080;
 
+// Enable CORS for all routes
+app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000', // Allow requests from your frontend
+    methods: ['GET', 'POST'], // Allow these HTTP methods
+    credentials: true // Allow credentials (cookies, authorization headers, etc)
+}));
+
+// Parse JSON bodies
+app.use(express.json());
+
 // Health check endpoint
 app.get('/', (req, res) => {
     res.status(200).send('Bot is running!');
+});
+
+// Token verification endpoint
+app.post('/verify-token', async (req, res) => {
+    try {
+        const { token, firebaseUserId } = req.body;
+        
+        if (!token || !firebaseUserId) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        // Get the token document
+        const tokenDoc = await db.collection('discord_login_tokens').doc(token).get();
+        
+        if (!tokenDoc.exists) {
+            return res.status(404).json({ error: 'Token not found' });
+        }
+
+        const tokenData = tokenDoc.data();
+        
+        // Check if token is expired
+        if (tokenData.expires_at < Date.now()) {
+            await tokenDoc.ref.delete();
+            return res.status(400).json({ error: 'Token has expired' });
+        }
+
+        // Update the user's document with their Discord ID
+        await db.collection('users').doc(firebaseUserId).update({
+            discord_id: tokenData.discord_id
+        });
+
+        // Delete the used token
+        await tokenDoc.ref.delete();
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error verifying token:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 // Start the server
