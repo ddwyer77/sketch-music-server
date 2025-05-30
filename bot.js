@@ -104,38 +104,42 @@ const isRateLimited = (userId) => {
     return false;
 };
 
+
+// Register slash commands
+const commandsList = [
+    new SlashCommandBuilder()
+        .setName('submit')
+        .setDescription('Submit a video to a campaign')
+        .addStringOption(option =>
+            option.setName('campaign_id')
+                .setDescription('The campaign ID')
+                .setRequired(true))
+        .addStringOption(option =>
+            option.setName('video_url')
+                .setDescription('The URL of the video to add')
+                .setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('login')
+        .setDescription('Get a link to authenticate your Discord account'),
+    new SlashCommandBuilder()
+        .setName('logout')
+        .setDescription('Unlink your Discord account'),
+    new SlashCommandBuilder()
+        .setName('status')
+        .setDescription('Check if you are logged in'),
+    new SlashCommandBuilder()
+        .setName('campaigns')
+        .setDescription('List current campaigns assigned to your server.'),
+    new SlashCommandBuilder()
+        .setName('commands')
+        .setDescription('List available commands'),
+];
+
 // Run cleanup every 5 minutes
 setInterval(cleanupExpiredTokens, 1000 * 60 * 5);
 
 client.once('ready', async () => {
     console.log(`Bot is online as ${client.user.tag}`);
-    
-    // Register slash commands
-    const commands = [
-        new SlashCommandBuilder()
-            .setName('submit')
-            .setDescription('Submit a video to a campaign')
-            .addStringOption(option =>
-                option.setName('campaign_id')
-                    .setDescription('The campaign ID')
-                    .setRequired(true))
-            .addStringOption(option =>
-                option.setName('video_url')
-                    .setDescription('The URL of the video to add')
-                    .setRequired(true)),
-        new SlashCommandBuilder()
-            .setName('login')
-            .setDescription('Get a link to authenticate your Discord account'),
-        new SlashCommandBuilder()
-            .setName('logout')
-            .setDescription('Unlink your Discord account'),
-        new SlashCommandBuilder()
-            .setName('status')
-            .setDescription('Check if you are logged in'),
-        new SlashCommandBuilder()
-            .setName('campaigns')
-            .setDescription('List current campaigns assigned to your server.')
-    ];
 
     try {
         if (!process.env.DISCORD_CLIENT_ID) {
@@ -147,17 +151,16 @@ client.once('ready', async () => {
         // Get the first guild the bot is in
         const guilds = await client.guilds.fetch();
         const firstGuild = guilds.first();
-        1377467566666027130
         if (!firstGuild) {
             throw new Error('Bot is not in any guilds');
         }
 
         console.log(`Registering commands for guild: ${firstGuild.name}`);
-        
+
         // Register commands to the specific guild
         await rest.put(
             Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID, firstGuild.id),
-            { body: commands }
+            { body: commandsList }
         );
         
         console.log('Successfully registered slash commands');
@@ -376,8 +379,33 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.commandName === 'commands') {
+        const embed = new EmbedBuilder()
+            .setTitle('Available Commands')
+            .setDescription('List of available bot commands and their usage.');
 
+        for (const cmd of commandsList) {
+            // Turn SlashCommandBuilder into a JSON object for easy inspection
+            const { name, description, options } = cmd.toJSON();
+
+            let argString = '';
+            if (options && options.length > 0) {
+                argString = options.map(opt =>
+                    `• \`${opt.name}\`${opt.required ? ' (required)' : ''}: ${opt.description}`
+                ).join('\n');
+            }
+
+            embed.addFields({
+                name: `/${name}`,
+                value: `${description}${argString ? '\n' + argString : ''}`
+            });
+        }
+
+        return interaction.reply({
+            embeds: [embed],
+            flags: MessageFlags.Ephemeral
+        });
     }
+
 });
 
 client.on('messageCreate', async (message) => {
