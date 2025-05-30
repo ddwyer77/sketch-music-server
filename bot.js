@@ -1,6 +1,15 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, MessageFlags } from 'discord.js';
 import { db, FieldValue } from './firebaseAdmin.js';
+import { 
+    isUserAuthenticated, 
+    getFirebaseUserId, 
+    cleanupExpiredTokens,
+    sanitizeDiscordId,
+    sanitizeToken,
+    sanitizeUrl,
+    sanitizeCampaignId
+} from './helper.js';
 import crypto from 'crypto';
 import express from 'express';
 
@@ -19,7 +28,7 @@ app.listen(port, () => {
 
 const TOKEN_EXPIRY = 1000 * 60 * 15; // 15 minutes
 const RATE_LIMIT_WINDOW = 1000 * 60; // 1 minute
-const MAX_REQUESTS = 3;
+const MAX_REQUESTS = 5;
 const RATE_LIMIT = new Map();
 
 const client = new Client({
@@ -27,25 +36,6 @@ const client = new Client({
 });
 
 const baseUrl = process.env.BOT_LOGIN_REDIRECT_URL;
-
-// Helper function to get Firebase user ID from Discord ID
-async function getFirebaseUserId(discordId) {
-    try {
-        const userDoc = await db.collection('users')
-            .where('discord_id', '==', discordId)
-            .limit(1)
-            .get();
-        
-        if (userDoc.empty) {
-            return null;
-        }
-        
-        return userDoc.docs[0].id;
-    } catch (error) {
-        console.error('Error getting Firebase user ID:', error);
-        return null;
-    }
-}
 
 // Rate limiting function
 const isRateLimited = (userId) => {
@@ -64,25 +54,8 @@ const isRateLimited = (userId) => {
     return false;
 };
 
-// Cleanup expired tokens
-const cleanupExpiredTokens = async () => {
-    try {
-        const expiredTokens = await db.collection('discord_firebase_tokens')
-            .where('expires_at', '<', Date.now())
-            .get();
-        
-        const batch = db.batch();
-        expiredTokens.docs.forEach(doc => {
-            batch.delete(doc.ref);
-        });
-        await batch.commit();
-    } catch (error) {
-        console.error('Error cleaning up expired tokens:', error);
-    }
-};
-
-// Run cleanup every hour
-setInterval(cleanupExpiredTokens, 1000 * 60 * 60);
+// Run cleanup every 5 minutes
+setInterval(cleanupExpiredTokens, 1000 * 60 * 5);
 
 client.once('ready', async () => {
     console.log(`Bot is online as ${client.user.tag}`);
@@ -99,7 +72,16 @@ client.once('ready', async () => {
             .addStringOption(option =>
                 option.setName('video_url')
                     .setDescription('The URL of the video to add')
-                    .setRequired(true))
+                    .setRequired(true)),
+        new SlashCommandBuilder()
+            .setName('login')
+            .setDescription('Get a link to authenticate your Discord account'),
+        new SlashCommandBuilder()
+            .setName('logout')
+            .setDescription('Unlink your Discord account'),
+        new SlashCommandBuilder()
+            .setName('status')
+            .setDescription('Check if you are logged in'),
     ];
 
     try {
@@ -144,32 +126,118 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
 
-    if (interaction.commandName === 'add') {
-        const discordId = interaction.user.id;
-        
-        if (isRateLimited(discordId)) {
-            return interaction.reply({ content: 'Please wait a moment before trying again.', ephemeral: true });
-        }
+    const discordId = interaction.user.id;
+    
+    if (isRateLimited(discordId)) {
+        return interaction.reply({ content: 'Please wait a moment before trying again.', flags: MessageFlags.Ephemeral});
+    }
 
-        const firebaseUserId = await getFirebaseUserId(discordId);
-        if (!firebaseUserId) {
+    // LOGIN COMMAND
+    if (interaction.commandName === 'login') {
+        try {
+            // Generate token and create document
+            const token = crypto.randomBytes(32).toString('hex');
+            const expiresAt = Date.now() + TOKEN_EXPIRY;
+
+            // Create the token document
+            await db.collection('discord_login_tokens').doc(token).set({
+                discord_id: sanitizeDiscordId(discordId),
+                username: interaction.user.username,
+                expires_at: expiresAt,
+                used: false,
+                created_at: Date.now()
+            });
+
+            // Generate the login URL with the token
+            const link = `${baseUrl}?token=${token}`;
             return interaction.reply({ 
-                content: 'You need to link your Discord account first. Use the !login command.', 
-                ephemeral: true 
+                content: `Click this link to link your Discord account: ${link}`,
+                flags: MessageFlags.Ephemeral 
+            });
+        } catch (error) {
+            console.error('Error generating login link:', error);
+            return interaction.reply({ 
+                content: 'Sorry, there was an error generating your login link. Please try again.',
+                flags: MessageFlags.Ephemeral 
             });
         }
+    }
 
-        const campaignId = interaction.options.getString('campaign_id');
-        const videoUrl = interaction.options.getString('video_url');
-
+    // STATUS COMMAND
+    if (interaction.commandName === 'status') {
         try {
+            const isAuthenticated = await isUserAuthenticated(discordId);
+            return interaction.reply({
+                content: `**Username:** \`${interaction.user.username}\`\n**Logged In:** \`${isAuthenticated}\``,
+                flags: MessageFlags.Ephemeral
+            });
+        } catch (error) {
+            console.error('An error has occurred with the status command:', error);
+            return interaction.reply({ 
+                content: 'Sorry, an error has occurred while trying to retrieve your status. Please try again later.',
+                flags: MessageFlags.Ephemeral 
+            });
+        }
+    }
+    
+    // LOGOUT COMMAND
+    if (interaction.commandName === 'logout') {
+        try {
+            const isAuthenticated = await isUserAuthenticated(discordId);
+            if (!isAuthenticated) {
+                return interaction.reply({
+                    content: 'It looks like you are already logged out. Log in with /login.',
+                    flags: MessageFlags.Ephemeral 
+                })
+            }
+
+            const tokenQuery = await db.collection('discord_login_tokens')
+                .where('discord_id', '==', sanitizeDiscordId(discordId))
+                .get();
+            const batch = db.batch();
+            tokenQuery.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+
+            await interaction.reply({ content: 'You have been logged out.', flags: MessageFlags.Ephemeral});
+        } catch (error) {
+            console.error('Error logging out:', error);
+            return interaction.reply({ 
+                content: 'Sorry, an error has occurred attempting to log you out. Please try again later.',
+                flags: MessageFlags.Ephemeral 
+            });
+        }
+    }
+
+    // ADD COMMAND
+    if (interaction.commandName === 'add') {
+        try {
+            // Check if user is authenticated
+            const isAuthenticated = await isUserAuthenticated(discordId);
+            if (!isAuthenticated) {
+                return interaction.reply({ 
+                    content: 'You need to authenticate first. Use the /login command.', 
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+
+            const firebaseUserId = await getFirebaseUserId(discordId);
+            if (!firebaseUserId) {
+                return interaction.reply({ 
+                    content: 'You need to link your Discord account first. Use the /login command.', 
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+
+            const campaignId = sanitizeCampaignId(interaction.options.getString('campaign_id'));
+            const videoUrl = sanitizeUrl(interaction.options.getString('video_url'));
+
             const campaignRef = db.collection('campaigns').doc(campaignId);
             const campaign = await campaignRef.get();
 
             if (!campaign.exists) {
                 return interaction.reply({ 
                     content: 'Campaign not found.', 
-                    ephemeral: true 
+                    flags: MessageFlags.Ephemeral
                 });
             }
 
@@ -188,13 +256,19 @@ client.on('interactionCreate', async interaction => {
 
             return interaction.reply({ 
                 content: 'Video added successfully!', 
-                ephemeral: true 
+                flags: MessageFlags.Ephemeral
             });
         } catch (error) {
             console.error('Error adding video:', error);
+            let errorMessage = 'There was an error adding your video. ';
+            if (error.message.includes('Invalid')) {
+                errorMessage += error.message;
+            } else {
+                errorMessage += 'Please try again.';
+            }
             return interaction.reply({ 
-                content: 'There was an error adding your video. Please try again.', 
-                ephemeral: true 
+                content: errorMessage, 
+                flags: MessageFlags.Ephemeral
             });
         }
     }
@@ -208,47 +282,6 @@ client.on('messageCreate', async (message) => {
     if (isRateLimited(discordId)) {
         return message.reply('Please wait a moment before trying again.');
     }
-
-    if (message.content === '!login') {
-        try {
-            // Generate token and create document
-            const token = crypto.randomBytes(32).toString('hex');
-            const expiresAt = Date.now() + TOKEN_EXPIRY;
-
-            // // Create the token document
-            await db.collection('discord_login_tokens').doc(token).set({
-                discord_id: discordId,
-                expires_at: expiresAt,
-                used: false,
-                created_at: Date.now()
-            });
-
-
-            // Generate the login URL with the token
-            const link = `${baseUrl}?token=${token}`;
-            return message.reply(`Click this link to link your Discord account: ${link}`);
-        } catch (error) {
-            console.error('Error generating login link:', error);
-            console.error('Error details:', {
-                code: error.code,
-                message: error.message,
-                stack: error.stack
-            });
-
-            if (error.code === 5) {
-                console.error('NOT_FOUND error - This usually means the database or collection does not exist');
-                return message.reply('Database connection error. Please contact an administrator.');
-            }
-            
-            if (error.code === 'permission-denied') {
-                return message.reply('Sorry, I don\'t have permission to perform this action. Please contact an administrator.');
-            }
-            return message.reply('Sorry, there was an error generating your login link. Please try again.');
-        }
-    }
-
-
-        
 });
 
 client.login(process.env.DISCORD_BOT_TOKEN);
