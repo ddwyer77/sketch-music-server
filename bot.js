@@ -19,7 +19,7 @@ const port = process.env.PORT || 8080;
 
 // Enable CORS for all routes
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000', // Allow requests from your frontend
+    origin: process.env.FRONTEND_BASE_URL || 'http://localhost:3000', // Allow requests from your frontend
     methods: ['GET', 'POST'], // Allow these HTTP methods
     credentials: true // Allow credentials (cookies, authorization headers, etc)
 }));
