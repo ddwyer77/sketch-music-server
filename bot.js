@@ -378,18 +378,27 @@ client.on('interactionCreate', async interaction => {
                 .setDescription(`**ID:** \`${doc.id}\``)
                 .setImage(data.imageUrl);
 
-            if (data.soundUrl && data.soundUrl.trim() !== '') {
-                embed.setURL(data.soundUrl);
-                embed.addFields({ name: "Sound URL", value: `[Listen here](${data.soundUrl})` });
+            let soundSection = '';
+            if (data.soundId && data.soundId.trim() !== '') {
+                soundSection += `**ID:** \`${data.soundId}\`\n`;
             } else {
-                embed.addFields({ name: "Sound URL", value: "N/A" });
+                soundSection += `**ID:** N/A\n`;
+            }
+            if (data.soundUrl && data.soundUrl.trim() !== '') {
+                soundSection += `**URL:** [Listen here](${data.soundUrl})`;
+            } else {
+                soundSection += `**URL:** N/A`;
+            }
+            embed.addFields({ name: "Sound", value: soundSection });
+
+            let notesSection = '';
+            if (data.notes && data.notes.trim() !== '') {
+                notesSection = data.notes;
+            } else {
+                notesSection = "N/A";
             }
 
-            if (data.soundId && data.soundId.trim() !== '') {
-                embed.addFields({ name: "Sound ID", value: `\`${data.soundId}\`` });
-            } else {
-                embed.addFields({ name: "Sound ID", value: "N/A" });
-            }
+            embed.addFields({ name: "Notes", value: notesSection });
 
             return embed;
         });
