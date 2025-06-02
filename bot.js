@@ -377,9 +377,22 @@ client.on('interactionCreate', async interaction => {
                 .setTitle(data.name || 'Untitled Campaign')
                 .setDescription(`**ID:** \`${doc.id}\``)
                 .setImage(data.imageUrl);
-            // if (data.imageUrl) embed.setImage(data.imageUrl);
+
+            if (data.soundUrl && data.soundUrl.trim() !== '') {
+                embed.setURL(data.soundUrl);
+                embed.addFields({ name: "Sound URL", value: `[Listen here](${data.soundUrl})` });
+            } else {
+                embed.addFields({ name: "Sound URL", value: "N/A" });
+            }
+
+            if (data.soundId && data.soundId.trim() !== '') {
+                embed.addFields({ name: "Sound ID", value: `\`${data.soundId}\`` });
+            } else {
+                embed.addFields({ name: "Sound ID", value: "N/A" });
+            }
+
             return embed;
-        })
+        });
 
         const seeAllNote = `Don't see what you're looking for? To see all campaigns, [click here](${process.env.FRONTEND_BASE_URL}/campaigns?serverId=${serverId}).`;
 
