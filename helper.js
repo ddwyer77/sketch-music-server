@@ -1,4 +1,5 @@
 import { db } from './firebaseAdmin.js';
+import axios from 'axios';
 
 // Input validation and sanitization
 function sanitizeDiscordId(discordId) {
@@ -92,6 +93,65 @@ export async function cleanupExpiredTokens() {
     } catch (error) {
         console.error('Error cleaning up expired tokens:', error);
     }
+}
+
+export async function getTikTokVideoData(url) {
+  try {
+    // Extract video ID from URL
+    const idMatch = url.match(/\/video\/(\d+)/);
+    if (!idMatch || !idMatch[1]) {
+      throw new Error('Could not extract video ID from URL: ' + url);
+    }
+    
+    const videoId = idMatch[1];
+    
+    const response = await axios({
+      method: 'GET',
+      url: 'https://tiktok-api23.p.rapidapi.com/api/post/detail',
+      params: { videoId },
+      headers: {
+        'x-rapidapi-key': process.env.RAPID_API_KEY,
+        'x-rapidapi-host': 'tiktok-api23.p.rapidapi.com'
+      },
+      timeout: 10000
+    });
+
+    const data = response.data;
+    
+    // Extract the metrics we care about
+    const stats = data?.itemInfo?.itemStruct?.stats;
+    const music = data?.itemInfo?.itemStruct?.music;
+    
+    return {
+      views: stats?.playCount || 0,
+      shares: stats?.shareCount || 0,
+      comments: stats?.commentCount || 0,
+      likes: stats?.diggCount || 0,
+      author: data?.itemInfo?.itemStruct?.author?.nickname || '',
+      description: data?.itemInfo?.itemStruct?.desc || '',
+      createdAt: data?.itemInfo?.itemStruct?.createTime 
+        ? new Date(data.itemInfo.itemStruct.createTime * 1000).toISOString() 
+        : '',
+      musicTitle: music?.title || '',
+      musicAuthor: music?.authorName || '',
+      musicId: music?.id || ''
+    };
+  } catch (error) {
+    console.error('Error fetching TikTok data:', error);
+    throw error;
+  }
+}
+
+export async function videoContainsRequiredSound(videoUrl, campaign) {
+    const videoData = await getTikTokVideoData(videoUrl);
+    const submissionSoundId = videoData.musicId;
+    const campaignSoundId = campaign.soundId;
+
+    if (submissionSoundId == campaignSoundId) {
+        return true;
+    }
+
+    return false;
 }
 
 // Export sanitization functions for use in other files

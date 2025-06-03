@@ -8,7 +8,8 @@ import {
     sanitizeDiscordId,
     sanitizeToken,
     sanitizeUrl,
-    sanitizeCampaignId
+    sanitizeCampaignId,
+    videoContainsRequiredSound
 } from './helper.js';
 import crypto from 'crypto';
 import express from 'express';
@@ -111,9 +112,12 @@ const commandsList = [
         .setName('submit')
         .setDescription('Submit a video to a campaign')
         .addStringOption(option =>
-            option.setName('campaign_id')
-                .setDescription('The campaign ID')
-                .setRequired(true))
+             option
+                  .setName('campaign_id')
+                  .setDescription('The campaign ID')
+                  .setRequired(true)
+                  .setAutocomplete(true) // <-- THIS LINE goes here!
+              )
         .addStringOption(option =>
             option.setName('video_url')
                 .setDescription('The URL of the video to add')
@@ -180,6 +184,55 @@ client.once('ready', async () => {
 
 // Handle slash commands
 client.on('interactionCreate', async interaction => {
+
+    // AUTOCOMPLETE for campaign_id
+    if (interaction.isAutocomplete()) {
+        const focusedOption = interaction.options.getFocused(true);
+
+        if (interaction.commandName === 'submit' && focusedOption.name === 'campaign_id') {
+          try {
+            const serverId = interaction.guildId;
+            const query = focusedOption.value?.toLowerCase() || '';
+
+            // Fetch up to 25 campaigns for this server
+            const campaignsSnapshot = await db
+              .collection('campaigns')
+              .where('serverIds', 'array-contains', serverId)
+              .limit(25)
+              .get();
+
+            const MAX_NAME_LENGTH = 100;
+
+            const choices = campaignsSnapshot.docs
+              .map(doc => {
+                const data = doc.data();
+                // Combine name and notes, truncate to 100 chars if needed
+                let name = `${data.name || doc.id}`;
+                if (name.length > MAX_NAME_LENGTH) {
+                  name = name.slice(0, MAX_NAME_LENGTH - 1) + '…';
+                }
+                return {
+                  name,
+                  value: doc.id
+                };
+              })
+              // Filter by user's current input
+              .filter(choice => choice.name.toLowerCase().includes(query))
+              .slice(0, 25);
+
+            // Always respond (even with an empty array)
+            return interaction.respond(choices);
+          } catch (error) {
+            console.error('Autocomplete error:', error);
+            // Show a fallback if error occurs
+            return interaction.respond([
+              { name: 'Failed to load campaigns', value: 'error' }
+            ]);
+          }
+        }
+        return;
+      }
+
     if (!interaction.isCommand()) return;
 
     const discordId = interaction.user.id;
@@ -307,12 +360,24 @@ client.on('interactionCreate', async interaction => {
 
             const campaignRef = db.collection('campaigns').doc(campaignId);
             const campaign = await campaignRef.get();
+            const campaignData = campaign.data();
 
             if (!campaign.exists) {
                 return interaction.reply({ 
                     content: 'Campaign not found.', 
                     flags: MessageFlags.Ephemeral
                 });
+            }
+
+            // Check if required sound is included
+            if (campaignData.requireSound && campaignData.soundId) {
+                const hasRequiredSound = await videoContainsRequiredSound(videoUrl, campaignData);
+                if (!hasRequiredSound) {
+                    return interaction.reply({ 
+                        content: `We've detected this submission does not contain the required sound ID: ${campaignData.soundId}. Please double check your submission or contact your administrator for more information.`, 
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
             }
 
             const now = Date.now();
@@ -375,7 +440,7 @@ client.on('interactionCreate', async interaction => {
             const data = doc.data();
             const embed = new EmbedBuilder()
                 .setTitle(data.name || 'Untitled Campaign')
-                .setDescription(`**ID:** \`${doc.id}\``)
+                .setDescription(`**Campaign ID:** \`${doc.id}\``)
                 .setImage(data.imageUrl);
 
             let soundSection = '';
