@@ -11,6 +11,7 @@ import {
     sanitizeCampaignId,
     videoContainsRequiredSound
 } from './helper.js';
+import { updateActiveCampaigns } from './discordCampaignManager.js';
 import crypto from 'crypto';
 import express from 'express';
 import cors from 'cors';
@@ -69,6 +70,26 @@ app.post('/verify-token', async (req, res) => {
     } catch (error) {
         console.error('Error verifying token:', error);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Update active campaigns endpoint
+app.post('/api/discord/update-active-campaigns', async (req, res) => {
+    try {
+        const { userId } = req.body;
+        
+        if (!userId) {
+            return res.status(400).json({ error: 'Missing required field: userId' });
+        }
+
+        const result = await updateActiveCampaigns(userId, client);
+        res.status(200).json(result);
+    } catch (error) {
+        console.error('Error in update-active-campaigns endpoint:', error);
+        res.status(500).json({ 
+            error: 'Failed to update active campaigns',
+            details: error.message 
+        });
     }
 });
 
