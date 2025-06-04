@@ -51,23 +51,65 @@ export async function updateActiveCampaigns(userId, discordClient) {
                 // Send new campaign embeds
                 for (const campaign of relevantCampaigns) {
                     const embed = new EmbedBuilder()
-                        .setTitle(campaign.name)
-                        .setDescription(campaign.description || 'No description available')
+                        .setTitle(campaign.name || 'N/A')
                         .setColor(0x0099ff)
                         .addFields(
                             {
-                                name: 'Status',
-                                value: campaign.status || 'Active',
-                                inline: true
+                                name: 'Notes',
+                                value: campaign.notes || 'N/A',
+                                inline: false
                             },
                             {
-                                name: 'Videos',
-                                value: `${campaign.videos?.length || 0} submitted`,
-                                inline: true
+                                name: 'Views',
+                                value: campaign.views?.toLocaleString() || 'N/A',
+                                inline: false
+                            },
+                            {
+                                name: 'Earnings',
+                                value: campaign.budgetUsed && campaign.budget 
+                                    ? `$${campaign.budgetUsed.toLocaleString()} / $${campaign.budget.toLocaleString()}`
+                                    : 'N/A',
+                                inline: false
+                            },
+                            {
+                                name: 'Rate',
+                                value: campaign.ratePerMillion 
+                                    ? `$${campaign.ratePerMillion.toLocaleString()}/M views`
+                                    : 'N/A',
+                                inline: false
+                            },
+                            {
+                                name: 'Max Submissions',
+                                value: campaign.maxSubmissions?.toLocaleString() || 'N/A',
+                                inline: false
                             }
-                        )
-                        .setTimestamp()
-                        .setFooter({ text: `Campaign ID: ${campaign.id}` });
+                        );
+
+                    // Add completion percentage with progress bar
+                    if (campaign.budgetUsed && campaign.budget) {
+                        const completionPercentage = (campaign.budgetUsed / campaign.budget) * 100;
+                        const progressBar = createProgressBar(completionPercentage);
+                        embed.addFields({
+                            name: 'Completion',
+                            value: `${progressBar}\n${completionPercentage.toFixed(1)}%`,
+                            inline: false
+                        });
+                    } else {
+                        embed.addFields({
+                            name: 'Completion',
+                            value: 'N/A',
+                            inline: false
+                        });
+                    }
+
+                    // Add sound information
+                    embed.addFields({
+                        name: 'Sounds',
+                        value: campaign.soundUrl 
+                            ? `[Listen](${campaign.soundUrl})\nSound ID: ${campaign.soundId || 'N/A'}`
+                            : 'N/A',
+                        inline: false
+                    });
 
                     if (campaign.imageUrl) {
                         embed.setImage(campaign.imageUrl);
@@ -98,4 +140,10 @@ export async function updateActiveCampaigns(userId, discordClient) {
         console.error('Error updating active campaigns:', error);
         throw error;
     }
+}
+
+function createProgressBar(percentage) {
+    const filledBlocks = Math.floor(percentage / 10);
+    const emptyBlocks = 10 - filledBlocks;
+    return `[${'█'.repeat(filledBlocks)}${'░'.repeat(emptyBlocks)}]`;
 } 
