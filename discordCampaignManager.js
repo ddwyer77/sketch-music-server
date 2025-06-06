@@ -1,18 +1,23 @@
 import { EmbedBuilder } from 'discord.js';
 import { db } from './firebaseAdmin.js';
 
-export async function updateActiveCampaigns(userId, discordClient) {
+export async function updateActiveCampaigns(discordClient) {
     try {
-        // Get all servers for the user
+
         const serversSnapshot = await db
             .collection('servers')
-            .where('owner_id', '==', userId)
             .get();
 
-        const servers = serversSnapshot.docs.map(doc => ({
+        let servers = serversSnapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
         }));
+
+        if (process.env.ENVIRONMENT === "development") {
+            servers = servers.filter(server => !server.isProductionServer);
+        } else if (process.env.ENVIRONMENT === 'production') {
+            servers = servers.filter(server => server.isProductionServer);
+        }
 
         // Get all campaigns
         const campaignsSnapshot = await db
