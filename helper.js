@@ -75,26 +75,6 @@ export async function getFirebaseUserId(discordId) {
     }
 }
 
-// Helper function to clean up expired tokens
-export async function cleanupExpiredTokens() {
-    try {
-        const thirtyMinutesAgo = Date.now() - (30 * 60 * 1000);
-        const expiredTokens = await db.collection('discord_login_tokens')
-            .where('expires_at', '<', thirtyMinutesAgo)
-            .get();
-        
-        const batch = db.batch();
-        expiredTokens.docs.forEach(doc => {
-            batch.delete(doc.ref);
-        });
-        await batch.commit();
-        
-        console.log(`Cleaned up ${expiredTokens.size} expired tokens`);
-    } catch (error) {
-        console.error('Error cleaning up expired tokens:', error);
-    }
-}
-
 export async function getTikTokVideoData(url) {
   try {
     // Extract video ID from URL

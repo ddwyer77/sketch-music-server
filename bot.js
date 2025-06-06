@@ -4,7 +4,6 @@ import { db, FieldValue } from './firebaseAdmin.js';
 import { 
     isUserAuthenticated, 
     getFirebaseUserId, 
-    cleanupExpiredTokens,
     sanitizeDiscordId,
     sanitizeToken,
     sanitizeUrl,
@@ -159,9 +158,6 @@ const commandsList = [
         .setName('commands')
         .setDescription('List available commands'),
 ];
-
-// Run cleanup every 5 minutes
-setInterval(cleanupExpiredTokens, 1000 * 60 * 5);
 
 client.once('ready', async () => {
     console.log(`Bot is online as ${client.user.tag}`);
