@@ -140,6 +140,61 @@ export async function videoContainsRequiredSound(videoUrl, campaign) {
     return false;
 }
 
+// Update all campaign metrics
+export async function updateAllCampaignMetrics() {
+    const campaignsSnapshot = await db.collection('campaigns').get();
+    const campaigns = campaignsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    for (const campaign of campaigns) {
+        if (!campaign.videos || !campaign.videos.length) continue;
+        try {
+            // Fetch metrics for each video URL in the campaign
+            const metricsPromises = campaign.videos.map(async video => {
+                const metrics = await getTikTokVideoData(video.url);
+                // Check if the video's music ID matches the campaign's sound ID
+                const soundIdMatch = campaign.soundId ? metrics.musicId === campaign.soundId : false;
+                return { ...metrics, soundIdMatch };
+            });
+            const metricsArray = await Promise.all(metricsPromises);
+
+            // Aggregate metrics across all videos
+            const aggregatedMetrics = metricsArray.reduce((total, current) => {
+                return {
+                    views: total.views + (current.views || 0),
+                    shares: total.shares + (current.shares || 0),
+                    comments: total.comments + (current.comments || 0),
+                    likes: total.likes + (current.likes || 0)
+                };
+            }, { views: 0, shares: 0, comments: 0, likes: 0 });
+
+            // Calculate budget used based on views and campaign rate
+            const budgetUsed = (aggregatedMetrics.views / 1000000) * (campaign.ratePerMillion || 0);
+
+            // Update videos with sound ID match information
+            const updatedVideos = campaign.videos.map((video, index) => ({
+                ...video,
+                soundIdMatch: metricsArray[index].soundIdMatch
+            }));
+
+            // Include additional metrics in the update
+            const campaignUpdate = {
+                views: aggregatedMetrics.views,
+                shares: aggregatedMetrics.shares,
+                comments: aggregatedMetrics.comments,
+                likes: aggregatedMetrics.likes,
+                budgetUsed,
+                lastUpdated: Date.now(),
+                videos: updatedVideos
+            };
+
+            // Update campaign in Firestore
+            await db.collection('campaigns').doc(campaign.id).update(campaignUpdate);
+        } catch (error) {
+            console.error(`Error updating metrics for campaign ${campaign.id}:`, error);
+        }
+    }
+}
+
 // Export sanitization functions for use in other files
 export {
     sanitizeDiscordId,

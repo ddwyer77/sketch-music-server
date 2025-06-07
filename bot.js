@@ -8,12 +8,14 @@ import {
     sanitizeUrl,
     sanitizeCampaignId,
     videoContainsRequiredSound,
-    getTikTokVideoData
+    getTikTokVideoData,
+    updateAllCampaignMetrics
 } from './helper.js';
 import { updateActiveCampaigns } from './discordCampaignManager.js';
 import crypto from 'crypto';
 import express from 'express';
 import cors from 'cors';
+import cron from 'node-cron';
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -85,6 +87,28 @@ app.post('/api/discord/update-active-campaigns', async (req, res) => {
             error: 'Failed to update active campaigns',
             details: error.message 
         });
+    }
+});
+
+// Add API endpoint to update all campaign metrics
+app.post('/api/update-metrics', async (req, res) => {
+    try {
+        await updateAllCampaignMetrics();
+        res.status(200).json({ message: 'Metrics updated successfully' });
+    } catch (error) {
+        console.error('Error updating campaign metrics:', error);
+        res.status(500).json({ error: 'Failed to update campaign metrics', details: error.message });
+    }
+});
+
+// Schedule metrics update every hour
+cron.schedule('0 * * * *', async () => {
+    console.log('Running scheduled campaign metrics update...');
+    try {
+        await updateAllCampaignMetrics();
+        console.log('Scheduled metrics update completed.');
+    } catch (error) {
+        console.error('Scheduled metrics update failed:', error);
     }
 });
 
