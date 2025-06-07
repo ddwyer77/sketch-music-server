@@ -385,11 +385,32 @@ client.on('interactionCreate', async interaction => {
             if (campaignData.requireSound && campaignData.soundId) {
                 const hasRequiredSound = await videoContainsRequiredSound(videoUrl, campaignData);
                 if (!hasRequiredSound) {
+                    const errorEmbed = new EmbedBuilder()
+                        .setColor('#FF0000')  // Red color for errors
+                        .setTitle('❌ Error')
+                        .setDescription(`We've detected this submission does not contain the required sound ID: ${campaignData.soundId}. Please double check your submission or contact your administrator for more information.`);
+                    
                     return interaction.reply({ 
-                        content: `We've detected this submission does not contain the required sound ID: ${campaignData.soundId}. Please double check your submission or contact your administrator for more information.`, 
+                        embeds: [errorEmbed],
                         flags: MessageFlags.Ephemeral
                     });
                 }
+            }
+
+            // Check for duplicate submissions
+            const existingVideos = campaignData.videos || [];
+            const isDuplicate = existingVideos.some(video => video.url === videoUrl);
+            
+            if (isDuplicate) {
+                const errorEmbed = new EmbedBuilder()
+                    .setColor('#FF0000')  // Red color for errors
+                    .setTitle('❌ Error')
+                    .setDescription('This video has already been submitted.');
+                
+                return interaction.reply({
+                    embeds: [errorEmbed],
+                    flags: MessageFlags.Ephemeral
+                });
             }
 
             // Get TikTok video data
@@ -421,8 +442,13 @@ client.on('interactionCreate', async interaction => {
                 videos: FieldValue.arrayUnion(submissionData)
             });
 
+            const successEmbed = new EmbedBuilder()
+                .setColor('#00FF00')  // Green color for success
+                .setTitle('✅ Success')
+                .setDescription('Video added successfully!');
+
             return interaction.reply({ 
-                content: 'Video added successfully!', 
+                embeds: [successEmbed],
                 flags: MessageFlags.Ephemeral
             });
         } catch (error) {
@@ -433,8 +459,14 @@ client.on('interactionCreate', async interaction => {
             } else {
                 errorMessage += 'Please try again.';
             }
+
+            const errorEmbed = new EmbedBuilder()
+                .setColor('#FF0000')  // Red color for errors
+                .setTitle('❌ Error')
+                .setDescription(errorMessage);
+            
             return interaction.reply({ 
-                content: errorMessage, 
+                embeds: [errorEmbed],
                 flags: MessageFlags.Ephemeral
             });
         }
