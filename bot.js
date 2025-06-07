@@ -413,6 +413,22 @@ client.on('interactionCreate', async interaction => {
                 });
             }
 
+            // Check max submissions limit
+            if (campaignData.maxSubmissions && campaignData.maxSubmissions !== '' && campaignData.maxSubmissions !== null) {
+                const currentSubmissions = existingVideos.length;
+                if (currentSubmissions >= campaignData.maxSubmissions) {
+                    const errorEmbed = new EmbedBuilder()
+                        .setColor('#FF0000')  // Red color for errors
+                        .setTitle('❌ Error')
+                        .setDescription('Sorry, this campaign has already reached the max number of submissions');
+                    
+                    return interaction.reply({
+                        embeds: [errorEmbed],
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+            }
+
             // Get TikTok video data
             const videoData = await getTikTokVideoData(videoUrl);
 
