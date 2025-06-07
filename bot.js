@@ -5,10 +5,10 @@ import {
     isUserAuthenticated, 
     getFirebaseUserId, 
     sanitizeDiscordId,
-    sanitizeToken,
     sanitizeUrl,
     sanitizeCampaignId,
-    videoContainsRequiredSound
+    videoContainsRequiredSound,
+    getTikTokVideoData
 } from './helper.js';
 import { updateActiveCampaigns } from './discordCampaignManager.js';
 import crypto from 'crypto';
@@ -392,17 +392,33 @@ client.on('interactionCreate', async interaction => {
                 }
             }
 
+            // Get TikTok video data
+            const videoData = await getTikTokVideoData(videoUrl);
+
             const now = Date.now();
-            const videoData = {
+            const submissionData = {
                 author_id: firebaseUserId,
                 created_at: now,
                 status: 'pending',
                 updated_at: now,
-                url: videoUrl
+                url: videoUrl,
+                // Add TikTok video data
+                id: videoData.id,
+                title: videoData.title,
+                author: videoData.author,
+                views: videoData.views,
+                shares: videoData.shares,
+                comments: videoData.comments,
+                likes: videoData.likes,
+                description: videoData.description,
+                createdAt: videoData.createdAt,
+                musicTitle: videoData.musicTitle,
+                musicAuthor: videoData.musicAuthor,
+                musicId: videoData.musicId
             };
 
             await campaignRef.update({
-                videos: FieldValue.arrayUnion(videoData)
+                videos: FieldValue.arrayUnion(submissionData)
             });
 
             return interaction.reply({ 

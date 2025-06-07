@@ -101,13 +101,19 @@ export async function getTikTokVideoData(url) {
     // Extract the metrics we care about
     const stats = data?.itemInfo?.itemStruct?.stats;
     const music = data?.itemInfo?.itemStruct?.music;
+    const author = data?.itemInfo?.itemStruct?.author;
     
     return {
+      id: videoId,
+      title: data?.shareMeta?.title || '',
+      author: author ? {
+        nickname: author.nickname,
+        uniqueId: author.uniqueId
+      } : undefined,
       views: stats?.playCount || 0,
       shares: stats?.shareCount || 0,
       comments: stats?.commentCount || 0,
       likes: stats?.diggCount || 0,
-      author: data?.itemInfo?.itemStruct?.author?.nickname || '',
       description: data?.itemInfo?.itemStruct?.desc || '',
       createdAt: data?.itemInfo?.itemStruct?.createTime 
         ? new Date(data.itemInfo.itemStruct.createTime * 1000).toISOString() 
