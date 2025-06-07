@@ -105,10 +105,19 @@ app.post('/api/update-metrics', async (req, res) => {
 cron.schedule('0 * * * *', async () => {
     console.log('Running scheduled campaign metrics update...');
     try {
+        // Update all campaign metrics
         await updateAllCampaignMetrics();
         console.log('Scheduled metrics update completed.');
+
+        // Only update Discord channels if the client is ready
+        if (client.isReady()) {
+            await updateActiveCampaigns(client);
+            console.log('Discord channel updates completed.');
+        } else {
+            console.log('Discord client not ready, skipping channel updates');
+        }
     } catch (error) {
-        console.error('Scheduled metrics update failed:', error);
+        console.error('Scheduled update failed:', error);
     }
 });
 

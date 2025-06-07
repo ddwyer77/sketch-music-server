@@ -120,7 +120,10 @@ export async function updateActiveCampaigns(discordClient) {
                         embed.setImage(campaign.imageUrl);
                     }
 
-                    await channel.send({ embeds: [embed] });
+                    await channel.send({ 
+                        embeds: [embed],
+                        flags: 4096 // This is the suppressNotifications flag
+                    });
                 }
 
                 results.push({
