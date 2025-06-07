@@ -121,7 +121,6 @@ const isRateLimited = (userId) => {
     return false;
 };
 
-
 // Register slash commands
 const commandsList = [
     new SlashCommandBuilder()

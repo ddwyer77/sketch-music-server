@@ -1,3 +1,6 @@
+## Start Servers
+- npm run dev
+
 # GCloud Commands
 - gcloud app deploy
 - gcloud app versions list
