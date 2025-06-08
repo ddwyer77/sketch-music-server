@@ -35,7 +35,7 @@ export async function updateActiveCampaigns(discordClient) {
         for (const server of servers) {
             // Find campaigns that include this server's ID
             const relevantCampaigns = campaigns.filter(campaign => 
-                campaign.serverIds?.includes(server.server_id)
+                campaign.serverIds?.includes(server.server_id) && !campaign.isComplete
             );
 
             // Get the Discord channel
