@@ -168,11 +168,22 @@ export async function updateAllCampaignMetrics() {
     for (const campaign of campaigns) {
         // Skip if campaign is already marked as complete
         if (campaign.isComplete) {
-            console.log(`Skipping completed campaign ${campaign.id}`);
             continue;
         }
 
-        if (!campaign.videos || !campaign.videos.length) continue;
+        if (!campaign.videos || !campaign.videos.length) {
+            // If no videos, set all metrics to 0
+            await db.collection('campaigns').doc(campaign.id).update({
+                views: 0,
+                shares: 0,
+                comments: 0,
+                likes: 0,
+                budgetUsed: 0,
+                lastUpdated: Date.now()
+            });
+            continue;
+        }
+
         try {
             // Fetch metrics for each video URL in the campaign
             const metricsPromises = campaign.videos.map(async video => {
@@ -182,19 +193,6 @@ export async function updateAllCampaignMetrics() {
                 return { ...metrics, soundIdMatch };
             });
             const metricsArray = await Promise.all(metricsPromises);
-
-            // Aggregate metrics across all videos
-            const aggregatedMetrics = metricsArray.reduce((total, current) => {
-                return {
-                    views: total.views + (current.views || 0),
-                    shares: total.shares + (current.shares || 0),
-                    comments: total.comments + (current.comments || 0),
-                    likes: total.likes + (current.likes || 0)
-                };
-            }, { views: 0, shares: 0, comments: 0, likes: 0 });
-
-            // Calculate budget used based on views and campaign rate
-            const budgetUsed = (aggregatedMetrics.views / 1000000) * (campaign.ratePerMillion || 0);
 
             // Update videos with sound ID match information and metrics
             const updatedVideos = campaign.videos.map((video, index) => ({
@@ -214,6 +212,17 @@ export async function updateAllCampaignMetrics() {
                 author: metricsArray[index].author
             }));
 
+            // Calculate total metrics by summing up all video metrics
+            const totalMetrics = updatedVideos.reduce((total, video) => ({
+                views: total.views + (video.views || 0),
+                shares: total.shares + (video.shares || 0),
+                comments: total.comments + (video.comments || 0),
+                likes: total.likes + (video.likes || 0)
+            }), { views: 0, shares: 0, comments: 0, likes: 0 });
+
+            // Calculate budget used based on total views and campaign rate, rounded to nearest integer
+            const budgetUsed = Math.round((totalMetrics.views / 1000000) * (campaign.ratePerMillion || 0));
+
             // Check if campaign should be marked as complete based on new metrics
             const completionStatus = checkCampaignCompletionCriteria({
                 ...campaign,
@@ -223,22 +232,24 @@ export async function updateAllCampaignMetrics() {
 
             // Include additional metrics in the update
             const campaignUpdate = {
-                views: aggregatedMetrics.views,
-                shares: aggregatedMetrics.shares,
-                comments: aggregatedMetrics.comments,
-                likes: aggregatedMetrics.likes,
+                views: totalMetrics.views,      // Sum of all video.views
+                shares: totalMetrics.shares,    // Sum of all video.shares
+                comments: totalMetrics.comments, // Sum of all video.comments
+                likes: totalMetrics.likes,      // Sum of all video.likes
                 budgetUsed,
                 isComplete: completionStatus,
                 lastUpdated: Date.now(),
                 videos: updatedVideos
             };
 
-            console.log('=== Campaign Update Debug ===');
-            console.log('Campaign ID:', campaign.id);
-            console.log('Aggregated Metrics:', aggregatedMetrics);
-            console.log('Campaign Update Object:', campaignUpdate);
-            console.log('First Video in Updated Videos:', updatedVideos[0]);
-            console.log('===========================');
+            updatedVideos.forEach((video, index) => {
+                console.log(`Video ${index + 1}:`, {
+                    views: video.views,
+                    shares: video.shares,
+                    comments: video.comments,
+                    likes: video.likes
+                });
+            });
 
             // Update campaign in Firestore
             await db.collection('campaigns').doc(campaign.id).update(campaignUpdate);

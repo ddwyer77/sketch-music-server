@@ -101,6 +101,16 @@ app.post('/api/update-metrics', async (req, res) => {
     }
 });
 
+app.post('/api/update-single-campaign-metrics', async (req, res) => {
+    try {
+        await updateSingleCampaignMetrics();
+        res.status(200).json({ message: 'Metrics updated successfully' });
+    } catch (error) {
+        console.error('Error updating campaign metrics:', error);
+        res.status(500).json({ error: 'Failed to update campaign metrics', details: error.message });
+    }
+})
+
 // Schedule metrics update every hour
 cron.schedule('0 * * * *', async () => {
     console.log('Running scheduled campaign metrics update...');
