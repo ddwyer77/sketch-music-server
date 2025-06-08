@@ -140,12 +140,38 @@ export async function videoContainsRequiredSound(videoUrl, campaign) {
     return false;
 }
 
+// Check if a campaign meets completion criteria
+export function checkCampaignCompletionCriteria(campaign) {
+    // TODO: Implement end date check when campaign end dates are added
+    // if (campaign.endDate && new Date(campaign.endDate) < new Date()) {
+    //     return true;
+    // }
+
+    // Check if budget has been reached
+    if (campaign.budget && campaign.budgetUsed >= campaign.budget) {
+        return true;
+    }
+
+    // Check if max submissions has been reached
+    if (campaign.maxSubmissions && campaign.videos?.length >= campaign.maxSubmissions) {
+        return true;
+    }
+
+    return false;
+}
+
 // Update all campaign metrics
 export async function updateAllCampaignMetrics() {
     const campaignsSnapshot = await db.collection('campaigns').get();
     const campaigns = campaignsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
     for (const campaign of campaigns) {
+        // Skip if campaign is already marked as complete
+        if (campaign.isComplete) {
+            console.log(`Skipping completed campaign ${campaign.id}`);
+            continue;
+        }
+
         if (!campaign.videos || !campaign.videos.length) continue;
         try {
             // Fetch metrics for each video URL in the campaign
@@ -170,11 +196,30 @@ export async function updateAllCampaignMetrics() {
             // Calculate budget used based on views and campaign rate
             const budgetUsed = (aggregatedMetrics.views / 1000000) * (campaign.ratePerMillion || 0);
 
-            // Update videos with sound ID match information
+            // Update videos with sound ID match information and metrics
             const updatedVideos = campaign.videos.map((video, index) => ({
                 ...video,
-                soundIdMatch: metricsArray[index].soundIdMatch
+                soundIdMatch: metricsArray[index].soundIdMatch,
+                // Add TikTok metrics to each video
+                views: metricsArray[index].views || 0,
+                shares: metricsArray[index].shares || 0,
+                comments: metricsArray[index].comments || 0,
+                likes: metricsArray[index].likes || 0,
+                title: metricsArray[index].title || '',
+                description: metricsArray[index].description || '',
+                createdAt: metricsArray[index].createdAt || '',
+                musicTitle: metricsArray[index].musicTitle || '',
+                musicAuthor: metricsArray[index].musicAuthor || '',
+                musicId: metricsArray[index].musicId || '',
+                author: metricsArray[index].author
             }));
+
+            // Check if campaign should be marked as complete based on new metrics
+            const completionStatus = checkCampaignCompletionCriteria({
+                ...campaign,
+                budgetUsed,
+                videos: updatedVideos
+            });
 
             // Include additional metrics in the update
             const campaignUpdate = {
@@ -183,9 +228,17 @@ export async function updateAllCampaignMetrics() {
                 comments: aggregatedMetrics.comments,
                 likes: aggregatedMetrics.likes,
                 budgetUsed,
+                isComplete: completionStatus,
                 lastUpdated: Date.now(),
                 videos: updatedVideos
             };
+
+            console.log('=== Campaign Update Debug ===');
+            console.log('Campaign ID:', campaign.id);
+            console.log('Aggregated Metrics:', aggregatedMetrics);
+            console.log('Campaign Update Object:', campaignUpdate);
+            console.log('First Video in Updated Videos:', updatedVideos[0]);
+            console.log('===========================');
 
             // Update campaign in Firestore
             await db.collection('campaigns').doc(campaign.id).update(campaignUpdate);
