@@ -565,12 +565,13 @@ client.on('interactionCreate', async interaction => {
         const campaignsSnapshot = await db
             .collection('campaigns')
             .where('serverIds', 'array-contains', serverId)
+            .where('isComplete', '==', false)  // Only show non-completed campaigns
             .limit(10)
             .get();
 
         if (campaignsSnapshot.empty) {
             return interaction.reply({
-                content: 'No campaigns found for this server. Please contact the server admin for more information.',
+                content: 'No active campaigns found for this server. Please contact the server admin for more information.',
                 flags: MessageFlags.Ephemeral
             });
         }
