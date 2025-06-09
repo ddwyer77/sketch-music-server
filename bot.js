@@ -239,10 +239,11 @@ client.on('interactionCreate', async interaction => {
             const serverId = interaction.guildId;
             const query = focusedOption.value?.toLowerCase() || '';
 
-            // Fetch up to 25 campaigns for this server
+            // Fetch up to 25 campaigns for this server that are not complete
             const campaignsSnapshot = await db
               .collection('campaigns')
               .where('serverIds', 'array-contains', serverId)
+              .where('isComplete', '==', false)
               .limit(25)
               .get();
 
@@ -264,6 +265,13 @@ client.on('interactionCreate', async interaction => {
               // Filter by user's current input
               .filter(choice => choice.name.toLowerCase().includes(query))
               .slice(0, 25);
+
+            // If no campaigns are available, show a message
+            if (choices.length === 0) {
+                return interaction.respond([
+                    { name: 'Sorry, there are currently no active campaigns', value: 'no_campaigns' }
+                ]);
+            }
 
             // Always respond (even with an empty array)
             return interaction.respond(choices);
@@ -410,6 +418,14 @@ client.on('interactionCreate', async interaction => {
             if (!campaign.exists) {
                 return interaction.reply({ 
                     content: 'Campaign not found.', 
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+
+            // Check if campaign is complete
+            if (campaignData.isComplete) {
+                return interaction.reply({ 
+                    content: 'Sorry, this campaign has already ended.', 
                     flags: MessageFlags.Ephemeral
                 });
             }
