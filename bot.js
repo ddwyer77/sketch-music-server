@@ -430,6 +430,23 @@ client.on('interactionCreate', async interaction => {
                 });
             }
 
+            // Get TikTok video data
+            const videoData = await getTikTokVideoData(videoUrl);
+
+            // Verify creator ID in bio matches the submitting user
+            const creatorIdInBio = videoData.author.signature;
+            if (!creatorIdInBio || !creatorIdInBio.includes(firebaseUserId)) {
+                const errorEmbed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Verification Error')
+                    .setDescription(`It looks like your creator ID either was not included in your bio or does not match the current user submitting the video. Please visit the Discord tab at ${process.env.FRONTEND_BASE_URL}/creator for more information.`);
+                
+                return interaction.reply({ 
+                    embeds: [errorEmbed],
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+
             // Check if required sound is included
             if (campaignData.requireSound && campaignData.soundId) {
                 const hasRequiredSound = await videoContainsRequiredSound(videoUrl, campaignData);
@@ -477,9 +494,6 @@ client.on('interactionCreate', async interaction => {
                     });
                 }
             }
-
-            // Get TikTok video data
-            const videoData = await getTikTokVideoData(videoUrl);
 
             const now = Date.now();
             const submissionData = {
