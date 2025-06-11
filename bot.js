@@ -9,7 +9,8 @@ import {
     sanitizeCampaignId,
     videoContainsRequiredSound,
     getTikTokVideoData,
-    updateAllCampaignMetrics
+    updateAllCampaignMetrics,
+    linkTikTokAccount
 } from './helper.js';
 import { updateActiveCampaigns } from './discordCampaignManager.js';
 import crypto from 'crypto';
@@ -33,6 +34,34 @@ app.use(express.json());
 // Health check endpoint
 app.get('/', (req, res) => {
     res.status(200).send('Bot is running!');
+});
+
+// TikTok user info test endpoint
+app.get('/link-tiktok-account/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { firebaseUserId } = req.query;
+
+        if (!firebaseUserId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Firebase user ID is required'
+            });
+        }
+
+        const result = await linkTikTokAccount(userId, firebaseUserId);
+        
+        // Return the same response structure as the function
+        return res.status(result.success ? 200 : 400).json(result);
+
+    } catch (error) {
+        console.error('Error linking TikTok account:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
 });
 
 // Token verification endpoint
@@ -164,7 +193,7 @@ const commandsList = [
                   .setName('campaign_id')
                   .setDescription('The campaign ID')
                   .setRequired(true)
-                  .setAutocomplete(true) // <-- THIS LINE goes here!
+                  .setAutocomplete(true)
               )
         .addStringOption(option =>
             option.setName('video_url')
@@ -185,6 +214,13 @@ const commandsList = [
     new SlashCommandBuilder()
         .setName('commands')
         .setDescription('List available commands'),
+    new SlashCommandBuilder()
+        .setName('link')
+        .setDescription('Link your TikTok account')
+        .addStringOption(option =>
+            option.setName('tiktok_username')
+                .setDescription('Your TikTok username')
+                .setRequired(true)),
 ];
 
 client.once('ready', async () => {
@@ -408,6 +444,22 @@ client.on('interactionCreate', async interaction => {
                 });
             }
 
+            // Check if TikTok account is verified
+            const userDoc = await db.collection('users').doc(firebaseUserId).get();
+            const userData = userDoc.data();
+            
+            if (!userData?.tiktokVerified) {
+                const errorEmbed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ TikTok Account Not Verified')
+                    .setDescription('You need to verify your TikTok account before submitting videos. Use the /link command to verify your TikTok account.');
+                
+                return interaction.reply({
+                    embeds: [errorEmbed],
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+
             const campaignId = sanitizeCampaignId(interaction.options.getString('campaign_id'));
             const videoUrl = sanitizeUrl(interaction.options.getString('video_url'));
 
@@ -617,6 +669,7 @@ client.on('interactionCreate', async interaction => {
         });
     }
 
+    // Commands Command
     if (interaction.commandName === 'commands') {
         const embed = new EmbedBuilder()
             .setTitle('Available Commands')
@@ -645,6 +698,62 @@ client.on('interactionCreate', async interaction => {
         });
     }
 
+    if (interaction.commandName === 'link') {
+        try {
+            // Check if user is authenticated
+            const isAuthenticated = await isUserAuthenticated(discordId);
+            if (!isAuthenticated) {
+                return interaction.reply({ 
+                    content: 'You need to authenticate first. Use the /login command.', 
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+
+            const firebaseUserId = await getFirebaseUserId(discordId);
+            if (!firebaseUserId) {
+                return interaction.reply({ 
+                    content: 'You need to link your Discord account first. Use the /login command.', 
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+
+            const tiktokUsername = sanitizeTikTokId(interaction.options.getString('tiktok_username'));
+            
+            // First reply to acknowledge the command
+            await interaction.deferReply({ ephemeral: true });
+
+            const result = await linkTikTokAccount(tiktokUsername, firebaseUserId);
+            
+            const embed = new EmbedBuilder()
+                .setTitle(result.success ? '✅ Success' : '❌ Error')
+                .setDescription(result.message)
+                .setColor(result.success ? '#00FF00' : '#FF0000');
+
+            if (result.success) {
+                embed.addFields(
+                    { name: 'TikTok Username', value: result.data.uniqueId },
+                    { name: 'Profile', value: result.data.title }
+                );
+            }
+
+            return interaction.editReply({
+                embeds: [embed],
+                flags: MessageFlags.Ephemeral
+            });
+
+        } catch (error) {
+            console.error('Error in link command:', error);
+            const errorEmbed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Error')
+                .setDescription('Failed to link TikTok account. Please try again later.');
+            
+            return interaction.editReply({
+                embeds: [errorEmbed],
+                flags: MessageFlags.Ephemeral
+            });
+        }
+    }
 });
 
 client.on('messageCreate', async (message) => {

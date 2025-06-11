@@ -10,6 +10,24 @@ function sanitizeDiscordId(discordId) {
     return discordId;
 }
 
+function sanitizeTikTokId(id) {
+  if (typeof tikTokId !== 'string') {
+    throw new Error('TikTok ID must be a string');
+  }
+
+  const trimmed = tikTokId.trim();
+
+  // Only allow a-z, A-Z, 0-9, underscore, and period
+  const safe = trimmed.replace(/[^a-zA-Z0-9._]/g, '');
+
+  // Optionally enforce length limits (TikTok allows 4–24)
+  if (safe.length < 4 || safe.length > 24) {
+    throw new Error('TikTok ID must be between 4 and 24 valid characters');
+  }
+
+  return safe;
+}
+
 function sanitizeToken(token) {
     // Tokens should be hex strings of length 64 (32 bytes)
     if (!/^[a-f0-9]{64}$/.test(token)) {
@@ -275,10 +293,67 @@ function calculateEarnings(campaign, views, currentEarnings = 0) {
     return Number(((rate / 1000000) * views).toFixed(2));
 }
 
+export async function linkTikTokAccount(id, firebaseUserId) {
+    try {
+        const response = await fetch(`https://tiktok-api23.p.rapidapi.com/api/user/info?uniqueId=${id}`, {
+            headers: {
+                'x-rapidapi-host': 'tiktok-api23.p.rapidapi.com',
+                'x-rapidapi-key': process.env.RAPID_API_KEY
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (!data.userInfo?.user?.signature) {
+            throw new Error('Could not fetch TikTok bio');
+        }
+
+        const signature = data.userInfo.user.signature;
+        
+        // Check if the bio contains the Firebase user ID
+        if (!signature.includes(firebaseUserId)) {
+            return {
+                success: false,
+                message: 'Your TikTok bio does not contain your verification code. Please add your unique ID to your bio and try again.'
+            };
+        }
+
+        // Prepare TikTok data to store
+        const tiktokData = {
+            uniqueId: data.userInfo.user.uniqueId,
+            profileImage: data.userInfo.user.avatarThumb,
+            title: data.shareMeta.title,
+            description: data.shareMeta.desc
+        };
+
+        // Update user document
+        await db.collection('users').doc(firebaseUserId).update({
+            tiktokVerified: true,
+            tiktokData: tiktokData,
+            updatedAt: Date.now()
+        });
+
+        return {
+            success: true,
+            message: 'Success! Your account has been verified',
+            data: tiktokData
+        };
+
+    } catch (error) {
+        console.error('Error linking TikTok account:', error);
+        return {
+            success: false,
+            message: 'Failed to verify TikTok account. Please try again later.',
+            error: error.message
+        };
+    }
+}
+
 // Export sanitization functions for use in other files
 export {
     sanitizeDiscordId,
     sanitizeToken,
     sanitizeUrl,
-    sanitizeCampaignId
+    sanitizeCampaignId,
+    sanitizeTikTokId    
 }; 
