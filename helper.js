@@ -209,7 +209,8 @@ export async function updateAllCampaignMetrics() {
                 musicTitle: metricsArray[index].musicTitle || '',
                 musicAuthor: metricsArray[index].musicAuthor || '',
                 musicId: metricsArray[index].musicId || '',
-                author: metricsArray[index].author
+                author: metricsArray[index].author,
+                earnings: calculateEarnings(campaign, metricsArray[index].views || 0, video.earnings)
             }));
 
             // Calculate total metrics by summing up all video metrics
@@ -242,21 +243,36 @@ export async function updateAllCampaignMetrics() {
                 videos: updatedVideos
             };
 
-            updatedVideos.forEach((video, index) => {
-                console.log(`Video ${index + 1}:`, {
-                    views: video.views,
-                    shares: video.shares,
-                    comments: video.comments,
-                    likes: video.likes
-                });
-            });
-
             // Update campaign in Firestore
             await db.collection('campaigns').doc(campaign.id).update(campaignUpdate);
         } catch (error) {
             console.error(`Error updating metrics for campaign ${campaign.id}:`, error);
         }
     }
+}
+
+function calculateEarnings(campaign, views, currentEarnings = 0) {
+    // Input validation
+    if (!campaign || typeof views !== 'number' || isNaN(views)) {
+        console.error('Invalid input to calculateEarnings:', { campaign, views });
+        return 0;
+    }
+
+    // For completed campaigns, return existing earnings if available
+    if (campaign.isComplete) {
+        return typeof currentEarnings === 'number' ? currentEarnings : 0;
+    }
+
+    // Ensure ratePerMillion is a valid number
+    const rate = Number(campaign.ratePerMillion);
+    if (isNaN(rate)) {
+        console.error('Invalid rate per million:', campaign.ratePerMillion);
+        return 0;
+    }
+
+    // Calculate earnings: (rate per million / 1,000,000) * views
+    // Round to 2 decimal places to avoid floating point precision issues
+    return Number(((rate / 1000000) * views).toFixed(2));
 }
 
 // Export sanitization functions for use in other files
