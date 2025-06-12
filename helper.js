@@ -11,11 +11,11 @@ function sanitizeDiscordId(discordId) {
 }
 
 function sanitizeTikTokId(id) {
-  if (typeof tikTokId !== 'string') {
+  if (typeof id !== 'string') {
     throw new Error('TikTok ID must be a string');
   }
 
-  const trimmed = tikTokId.trim();
+  const trimmed = id.trim();
 
   // Only allow a-z, A-Z, 0-9, underscore, and period
   const safe = trimmed.replace(/[^a-zA-Z0-9._]/g, '');
@@ -293,9 +293,54 @@ function calculateEarnings(campaign, views, currentEarnings = 0) {
     return Number(((rate / 1000000) * views).toFixed(2));
 }
 
-export async function linkTikTokAccount(id, firebaseUserId) {
+export async function linkTikTokAccount(tiktokUsername, linkToken) {
     try {
-        const response = await fetch(`https://tiktok-api23.p.rapidapi.com/api/user/info?uniqueId=${id}`, {
+        // Validate inputs
+        if (!tiktokUsername || !linkToken) {
+            return {
+                success: false,
+                message: 'Both TikTok username and link token are required.'
+            };
+        }
+
+        // Sanitize TikTok username
+        const sanitizedUsername = sanitizeTikTokId(tiktokUsername);
+
+        // First verify the token
+        const tokenQuery = await db.collection('socialMediaAccountLinkTokens')
+            .where('token', '==', linkToken)
+            .limit(1)
+            .get();
+
+        if (tokenQuery.empty) {
+            return {
+                success: false,
+                message: 'Invalid or expired token. Please generate a new token from the website.'
+            };
+        }
+
+        const tokenDoc = tokenQuery.docs[0];
+        const tokenData = tokenDoc.data();
+
+        // Check if token is expired
+        if (tokenData.expires_at < Date.now()) {
+            await tokenDoc.ref.delete();
+            return {
+                success: false,
+                message: 'Token has expired. Please generate a new token from the website.'
+            };
+        }
+
+        // Check if token is already used
+        if (tokenData.used) {
+            return {
+                success: false,
+                message: 'This token has already been used. Please generate a new token from the website.'
+            };
+        }
+
+        // Get TikTok user info
+        const response = await fetch(`https://tiktok-api23.p.rapidapi.com/api/user/info?uniqueId=${sanitizedUsername}`, {
             headers: {
                 'x-rapidapi-host': 'tiktok-api23.p.rapidapi.com',
                 'x-rapidapi-key': process.env.RAPID_API_KEY
@@ -310,11 +355,33 @@ export async function linkTikTokAccount(id, firebaseUserId) {
 
         const signature = data.userInfo.user.signature;
         
-        // Check if the bio contains the Firebase user ID
-        if (!signature.includes(firebaseUserId)) {
+        // Log the user's bio and token for debugging
+        console.log('Verification Check:', {
+            bio: signature,
+            token: linkToken,
+            userId: tokenData.userId,
+            bioContainsToken: signature.toLowerCase().includes(linkToken.toLowerCase())
+        });
+        
+        // Check if the bio contains the token (case insensitive)
+        if (!signature.toLowerCase().includes(linkToken.toLowerCase())) {
             return {
                 success: false,
                 message: 'Your TikTok bio does not contain your verification code. Please add your unique ID to your bio and try again.'
+            };
+        }
+
+        // Verify we have a valid user ID, fallback to doc ID if missing
+        let userId = tokenData.userId;
+        if (!userId) {
+            userId = tokenDoc.id;
+            console.warn('Token data missing userId field, falling back to document ID:', userId);
+        }
+        if (!userId) {
+            console.error('No userId found in token data or document ID:', tokenData, tokenDoc.id);
+            return {
+                success: false,
+                message: 'Invalid token data. Please generate a new token from the website.'
             };
         }
 
@@ -327,10 +394,15 @@ export async function linkTikTokAccount(id, firebaseUserId) {
         };
 
         // Update user document
-        await db.collection('users').doc(firebaseUserId).update({
+        await db.collection('users').doc(userId).update({
             tiktokVerified: true,
             tiktokData: tiktokData,
             updatedAt: Date.now()
+        });
+
+        // Mark token as used
+        await tokenDoc.ref.update({
+            used: true
         });
 
         return {

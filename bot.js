@@ -10,7 +10,8 @@ import {
     videoContainsRequiredSound,
     getTikTokVideoData,
     updateAllCampaignMetrics,
-    linkTikTokAccount
+    linkTikTokAccount,
+    sanitizeTikTokId
 } from './helper.js';
 import { updateActiveCampaigns } from './discordCampaignManager.js';
 import crypto from 'crypto';
@@ -68,6 +69,8 @@ app.get('/link-tiktok-account/:userId', async (req, res) => {
 app.post('/verify-token', async (req, res) => {
     try {
         const { token, firebaseUserId } = req.body;
+
+        
         
         if (!token || !firebaseUserId) {
             return res.status(400).json({ error: 'Missing required fields' });
@@ -130,6 +133,66 @@ app.post('/api/update-metrics', async (req, res) => {
     }
 });
 
+// Generate social media account link token
+app.post('/api/generate-social-media-account-link-token', async (req, res) => {
+    try {
+        const { firebaseUserId } = req.body;
+
+        if (!firebaseUserId) {
+            return res.status(400).json({ error: 'Firebase user ID is required' });
+        }
+
+        // Generate a user-friendly token (8 characters, alphanumeric)
+        const generateToken = () => {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let token = '';
+            for (let i = 0; i < 8; i++) {
+                token += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return token;
+        };
+
+        // Check for existing token and clean up expired ones
+        const existingTokenDoc = await db.collection('socialMediaAccountLinkTokens').doc(firebaseUserId).get();
+        
+        if (existingTokenDoc.exists) {
+            const tokenData = existingTokenDoc.data();
+            // If token is expired, we'll generate a new one
+            if (tokenData.expires_at < Date.now()) {
+                await existingTokenDoc.ref.delete();
+            } else {
+                // Return existing valid token
+                return res.json({
+                    token: tokenData.token,
+                    expires_at: tokenData.expires_at
+                });
+            }
+        }
+
+        // Generate new token
+        const token = generateToken();
+        const expires_at = Date.now() + (60 * 60 * 1000); // 1 hour from now
+
+        // Store token in database WITH userId
+        await db.collection('socialMediaAccountLinkTokens').doc(firebaseUserId).set({
+            token,
+            userId: firebaseUserId,
+            created_at: Date.now(),
+            expires_at,
+            used: false
+        });
+
+        res.json({
+            token,
+            expires_at
+        });
+
+    } catch (error) {
+        console.error('Error generating social media account link token:', error);
+        res.status(500).json({ error: 'Failed to generate token', details: error.message });
+    }
+});
+
 // Schedule metrics update every hour
 cron.schedule('0 * * * *', async () => {
     console.log('Running scheduled campaign metrics update...');
@@ -149,6 +212,26 @@ cron.schedule('0 * * * *', async () => {
         console.error('Scheduled update failed:', error);
     }
 });
+
+// Clean up expired social media account link tokens
+const cleanupExpiredTokens = async () => {
+    try {
+        const now = Date.now();
+        const expiredTokens = await db.collection('socialMediaAccountLinkTokens')
+            .where('expires_at', '<', now)
+            .get();
+
+        const deletePromises = expiredTokens.docs.map(doc => doc.ref.delete());
+        await Promise.all(deletePromises);
+
+        console.log(`Cleaned up ${expiredTokens.size} expired social media account link tokens`);
+    } catch (error) {
+        console.error('Error cleaning up expired tokens:', error);
+    }
+};
+
+// Schedule token cleanup every 15 minutes
+cron.schedule('*/15 * * * *', cleanupExpiredTokens);
 
 // Start the server
 app.listen(port, () => {
@@ -220,6 +303,10 @@ const commandsList = [
         .addStringOption(option =>
             option.setName('tiktok_username')
                 .setDescription('Your TikTok username')
+                .setRequired(true))
+        .addStringOption(option =>
+            option.setName('link_token')
+                .setDescription('The token generated from the website')
                 .setRequired(true)),
 ];
 
@@ -717,12 +804,26 @@ client.on('interactionCreate', async interaction => {
                 });
             }
 
-            const tiktokUsername = sanitizeTikTokId(interaction.options.getString('tiktok_username'));
+            const tiktokUsername = interaction.options.getString('tiktok_username');
+            const linkToken = interaction.options.getString('link_token');
+
+            if (!tiktokUsername || !linkToken) {
+                const errorEmbed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Error')
+                    .setDescription('Both TikTok username and link token are required.');
+                
+                return interaction.reply({
+                    embeds: [errorEmbed],
+                    flags: MessageFlags.Ephemeral
+                });
+            }
             
             // First reply to acknowledge the command
             await interaction.deferReply({ ephemeral: true });
 
-            const result = await linkTikTokAccount(tiktokUsername, firebaseUserId);
+            // Link the TikTok account
+            const result = await linkTikTokAccount(tiktokUsername, linkToken);
             
             const embed = new EmbedBuilder()
                 .setTitle(result.success ? '✅ Success' : '❌ Error')
