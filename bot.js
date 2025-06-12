@@ -37,7 +37,6 @@ app.get('/', (req, res) => {
     res.status(200).send('Bot is running!');
 });
 
-// TikTok user info test endpoint
 app.get('/link-tiktok-account/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
@@ -142,6 +141,22 @@ app.post('/api/generate-social-media-account-link-token', async (req, res) => {
             return res.status(400).json({ error: 'Firebase user ID is required' });
         }
 
+        // Check rate limit
+        const rateLimitKey = `token_gen_${firebaseUserId}`;
+        const now = Date.now();
+        const userRequests = RATE_LIMIT.get(rateLimitKey) || [];
+        const recentRequests = userRequests.filter(time => now - time < RATE_LIMIT_WINDOW);
+        
+        if (recentRequests.length >= MAX_REQUESTS) {
+            return res.status(429).json({ 
+                error: 'Too many requests. Please try again later.',
+                retryAfter: Math.ceil((RATE_LIMIT_WINDOW - (now - recentRequests[0])) / 1000)
+            });
+        }
+        
+        recentRequests.push(now);
+        RATE_LIMIT.set(rateLimitKey, recentRequests);
+
         // Generate a user-friendly token (8 characters, alphanumeric)
         const generateToken = () => {
             const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -151,23 +166,6 @@ app.post('/api/generate-social-media-account-link-token', async (req, res) => {
             }
             return token;
         };
-
-        // Check for existing token and clean up expired ones
-        const existingTokenDoc = await db.collection('socialMediaAccountLinkTokens').doc(firebaseUserId).get();
-        
-        if (existingTokenDoc.exists) {
-            const tokenData = existingTokenDoc.data();
-            // If token is expired, we'll generate a new one
-            if (tokenData.expires_at < Date.now()) {
-                await existingTokenDoc.ref.delete();
-            } else {
-                // Return existing valid token
-                return res.json({
-                    token: tokenData.token,
-                    expires_at: tokenData.expires_at
-                });
-            }
-        }
 
         // Generate new token
         const token = generateToken();
@@ -571,20 +569,6 @@ client.on('interactionCreate', async interaction => {
 
             // Get TikTok video data
             const videoData = await getTikTokVideoData(videoUrl);
-
-            // Verify creator ID in bio matches the submitting user
-            const creatorIdInBio = videoData.author.signature;
-            if (!creatorIdInBio || !creatorIdInBio.includes(firebaseUserId)) {
-                const errorEmbed = new EmbedBuilder()
-                    .setColor('#FF0000')
-                    .setTitle('❌ Verification Error')
-                    .setDescription(`It looks like your creator ID either was not included in your bio or does not match the current user submitting the video. Please visit the Discord tab at ${process.env.FRONTEND_BASE_URL}/creator for more information.`);
-                
-                return interaction.reply({ 
-                    embeds: [errorEmbed],
-                    flags: MessageFlags.Ephemeral
-                });
-            }
 
             // Check if required sound is included
             if (campaignData.requireSound && campaignData.soundId) {
