@@ -8,3 +8,6 @@
 
 ### Deploy with the stop-previous-version flag
 - gcloud app deploy --stop-previous-version
+
+### Logs
+gcloud app logs tail

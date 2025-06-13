@@ -95,6 +95,27 @@ export async function getFirebaseUserId(discordId) {
 
 export async function getTikTokVideoData(url) {
   try {
+    // Check if it's a shortened URL
+    if (url.includes('/t/')) {
+      try {
+        // Follow the redirect to get the full URL
+        const response = await axios({
+          method: 'GET',
+          url: url,
+          maxRedirects: 5,
+          validateStatus: function (status) {
+            return status >= 200 && status < 400; // Accept redirects
+          }
+        });
+        
+        // Get the final URL after redirects
+        url = response.request.res.responseUrl;
+      } catch (error) {
+        console.error('Error resolving shortened URL:', error);
+        throw new Error('Could not resolve shortened URL. Please use the full video URL.');
+      }
+    }
+
     // Extract video ID from URL
     const idMatch = url.match(/\/video\/(\d+)/);
     if (!idMatch || !idMatch[1]) {

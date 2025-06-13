@@ -451,14 +451,16 @@ client.on('interactionCreate', async interaction => {
         try {
             const isAuthenticated = await isUserAuthenticated(discordId);
             let email = null;
+            let tiktokVerified = false;
             const firebaseUserId = await getFirebaseUserId(discordId);
             if (firebaseUserId) {
                 const userDoc = await db.collection('users').doc(firebaseUserId).get();
                 if (userDoc.exists) {
                     email = userDoc.data().email || null;
+                    tiktokVerified = userDoc.data().tiktokVerified || false;
                 }
             }
-            let content = `**Username:** \`${interaction.user.username}\`\n**Logged In:** \`${isAuthenticated}\`\n**Server ID:** \`${interaction.guildId}\``;
+            let content = `**Username:** \`${interaction.user.username}\`\n**Logged In:** \`${isAuthenticated}\`\n**Server ID:** \`${interaction.guildId}\`\n**TikTok Account Verified:** \`${tiktokVerified}\``;
             if (email) {
                 content += `\n**Email:** \`${email}\``;
             }
