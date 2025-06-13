@@ -40,16 +40,16 @@ app.get('/', (req, res) => {
 app.get('/link-tiktok-account/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
-        const { firebaseUserId } = req.query;
+        const { firebaseUserId, token } = req.query;
 
-        if (!firebaseUserId) {
+        if (!firebaseUserId || !token) {
             return res.status(400).json({
                 success: false,
-                message: 'Firebase user ID is required'
+                message: 'Firebase user ID and token are required'
             });
         }
 
-        const result = await linkTikTokAccount(userId, firebaseUserId);
+        const result = await linkTikTokAccount(userId, token);
         
         // Return the same response structure as the function
         return res.status(result.success ? 200 : 400).json(result);

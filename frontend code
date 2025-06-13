@@ -1,0 +1,30 @@
+const handleLinkTikTok = async () => {
+    if (!user?.uid || !tiktokUsername || !linkToken) return;
+    
+    setIsLinking(true);
+    setLinkingError(null);
+    
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/link-tiktok-account/${tiktokUsername}?firebaseUserId=${user.uid}&token=${linkToken}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        alert('TikTok account linked successfully! You can now remove the token from your bio.');
+        setTiktokUsername('');
+        setLinkToken(null);
+      } else {
+        setLinkingError(data.message || 'Failed to link TikTok account');
+      }
+    } catch (error) {
+      console.error('Error linking TikTok account:', error);
+      setLinkingError('An error occurred while linking your TikTok account');
+    } finally {
+      setIsLinking(false);
+    }
+  }; 
