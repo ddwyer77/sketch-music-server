@@ -1,23 +1,26 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, MessageFlags, EmbedBuilder } from 'discord.js';
 import { db, FieldValue } from './firebaseAdmin.js';
-import { 
-    isUserAuthenticated, 
-    getFirebaseUserId, 
-    sanitizeDiscordId,
-    sanitizeUrl,
-    sanitizeCampaignId,
-    videoContainsRequiredSound,
-    getTikTokVideoData,
-    updateAllCampaignMetrics,
-    linkTikTokAccount,
-    sanitizeTikTokId
-} from './helper.js';
+import { updateAllCampaignMetrics, linkTikTokAccount } from './helper.js';
 import { updateActiveCampaigns } from './discordCampaignManager.js';
-import crypto from 'crypto';
+import { 
+    client, 
+    loginClient, 
+    commandsList,
+    handleSubmitCommand,
+    handleCampaignsCommand,
+    handleLoginCommand,
+    handleLogoutCommand,
+    handleStatusCommand,
+    handleCommandsCommand,
+    handleLinkCommand,
+    handleCampaignAutocomplete,
+    isRateLimited
+} from './commands.js';
+import { TOKEN_EXPIRY, RATE_LIMIT_WINDOW, MAX_REQUESTS, RATE_LIMIT } from './constants.js';
 import express from 'express';
 import cors from 'cors';
 import cron from 'node-cron';
+import { REST, Routes } from 'discord.js';
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -228,86 +231,10 @@ const cleanupExpiredTokens = async () => {
     }
 };
 
-// Schedule token cleanup every 15 minutes
-cron.schedule('*/15 * * * *', cleanupExpiredTokens);
+// Schedule token cleanup every 30 minutes
+cron.schedule('*/30 * * * *', cleanupExpiredTokens);
 
-// Start the server
-app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
-});
-
-const TOKEN_EXPIRY = 1000 * 60 * 15; // 15 minutes
-const RATE_LIMIT_WINDOW = 1000 * 60; // 1 minute
-const MAX_REQUESTS = 5;
-const RATE_LIMIT = new Map();
-
-const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
-});
-
-const baseUrl = process.env.BOT_LOGIN_REDIRECT_URL;
-
-// Rate limiting function
-const isRateLimited = (userId) => {
-    const now = Date.now();
-    const userRequests = RATE_LIMIT.get(userId) || [];
-    
-    // Clean old requests
-    const recentRequests = userRequests.filter(time => now - time < RATE_LIMIT_WINDOW);
-    
-    if (recentRequests.length >= MAX_REQUESTS) {
-        return true;
-    }
-    
-    recentRequests.push(now);
-    RATE_LIMIT.set(userId, recentRequests);
-    return false;
-};
-
-// Register slash commands
-const commandsList = [
-    new SlashCommandBuilder()
-        .setName('submit')
-        .setDescription('Submit a video to a campaign')
-        .addStringOption(option =>
-             option
-                  .setName('campaign_id')
-                  .setDescription('The campaign ID')
-                  .setRequired(true)
-                  .setAutocomplete(true)
-              )
-        .addStringOption(option =>
-            option.setName('video_url')
-                .setDescription('The URL of the video to add')
-                .setRequired(true)),
-    new SlashCommandBuilder()
-        .setName('login')
-        .setDescription('Get a link to authenticate your Discord account'),
-    new SlashCommandBuilder()
-        .setName('logout')
-        .setDescription('Unlink your Discord account'),
-    new SlashCommandBuilder()
-        .setName('status')
-        .setDescription('Check if you are logged in'),
-    new SlashCommandBuilder()
-        .setName('campaigns')
-        .setDescription('List current campaigns assigned to your server.'),
-    new SlashCommandBuilder()
-        .setName('commands')
-        .setDescription('List available commands'),
-    new SlashCommandBuilder()
-        .setName('link')
-        .setDescription('Link your TikTok account')
-        .addStringOption(option =>
-            option.setName('tiktok_username')
-                .setDescription('Your TikTok username')
-                .setRequired(true))
-        .addStringOption(option =>
-            option.setName('link_token')
-                .setDescription('The token generated from the website')
-                .setRequired(true)),
-];
-
+// Register slash commands when the bot starts
 client.once('ready', async () => {
     console.log(`Bot is online as ${client.user.tag}`);
 
@@ -336,521 +263,83 @@ client.once('ready', async () => {
         console.log('Successfully registered slash commands');
     } catch (error) {
         console.error('Error registering slash commands:', error);
-        console.error('Full error details:', {
-            message: error.message,
-            code: error.code,
-            stack: error.stack
-        });
-        
-        if (error.message.includes('DISCORD_CLIENT_ID')) {
-            console.error('Please set DISCORD_CLIENT_ID in your .env file');
-        }
     }
 });
 
-// Handle slash commands
+// Handle interactions
 client.on('interactionCreate', async interaction => {
-
-    // AUTOCOMPLETE for campaign_id
-    if (interaction.isAutocomplete()) {
-        const focusedOption = interaction.options.getFocused(true);
-
-        if (interaction.commandName === 'submit' && focusedOption.name === 'campaign_id') {
-          try {
-            const serverId = interaction.guildId;
-            const query = focusedOption.value?.toLowerCase() || '';
-
-            // Fetch up to 25 campaigns for this server that are not complete
-            const campaignsSnapshot = await db
-              .collection('campaigns')
-              .where('serverIds', 'array-contains', serverId)
-              .where('isComplete', '==', false)
-              .limit(25)
-              .get();
-
-            const MAX_NAME_LENGTH = 100;
-
-            const choices = campaignsSnapshot.docs
-              .map(doc => {
-                const data = doc.data();
-                // Combine name and notes, truncate to 100 chars if needed
-                let name = `${data.name || doc.id}`;
-                if (name.length > MAX_NAME_LENGTH) {
-                  name = name.slice(0, MAX_NAME_LENGTH - 1) + '…';
-                }
-                return {
-                  name,
-                  value: doc.id
-                };
-              })
-              // Filter by user's current input
-              .filter(choice => choice.name.toLowerCase().includes(query))
-              .slice(0, 25);
-
-            // If no campaigns are available, show a message
-            if (choices.length === 0) {
-                return interaction.respond([
-                    { name: 'Sorry, there are currently no active campaigns', value: 'no_campaigns' }
-                ]);
+    try {
+        // Handle autocomplete
+        if (interaction.isAutocomplete()) {
+            const focusedOption = interaction.options.getFocused(true);
+            if (interaction.commandName === 'submit' && focusedOption.name === 'campaign_id') {
+                await handleCampaignAutocomplete(interaction);
             }
-
-            // Always respond (even with an empty array)
-            return interaction.respond(choices);
-          } catch (error) {
-            console.error('Autocomplete error:', error);
-            // Show a fallback if error occurs
-            return interaction.respond([
-              { name: 'Failed to load campaigns', value: 'error' }
-            ]);
-          }
+            return;
         }
-        return;
-      }
 
-    if (!interaction.isCommand()) return;
+        if (!interaction.isCommand()) return;
 
-    const discordId = interaction.user.id;
-    
-    if (isRateLimited(discordId)) {
-        return interaction.reply({ content: 'Please wait a moment before trying again.', flags: MessageFlags.Ephemeral});
-    }
-
-    // LOGIN COMMAND
-    if (interaction.commandName === 'login') {
-        try {
-            // Generate token and create document
-            const token = crypto.randomBytes(32).toString('hex');
-            const expiresAt = Date.now() + TOKEN_EXPIRY;
-
-            // Create the token document
-            await db.collection('discord_login_tokens').doc(token).set({
-                discord_id: sanitizeDiscordId(discordId),
-                username: interaction.user.username,
-                expires_at: expiresAt,
-                used: false,
-                created_at: Date.now()
-            });
-
-            // Generate the login URL with the token
-            const link = `${baseUrl}?token=${token}`;
+        const discordId = interaction.user.id;
+        
+        if (isRateLimited(discordId)) {
             return interaction.reply({ 
-                content: `Click this link to link your Discord account: ${link}`,
-                flags: MessageFlags.Ephemeral 
-            });
-        } catch (error) {
-            console.error('Error generating login link:', error);
-            return interaction.reply({ 
-                content: 'Sorry, there was an error generating your login link. Please try again.',
-                flags: MessageFlags.Ephemeral 
-            });
-        }
-    }
-
-    // STATUS COMMAND
-    if (interaction.commandName === 'status') {
-        try {
-            const isAuthenticated = await isUserAuthenticated(discordId);
-            let email = null;
-            let tiktokVerified = false;
-            const firebaseUserId = await getFirebaseUserId(discordId);
-            if (firebaseUserId) {
-                const userDoc = await db.collection('users').doc(firebaseUserId).get();
-                if (userDoc.exists) {
-                    email = userDoc.data().email || null;
-                    tiktokVerified = userDoc.data().tiktokVerified || false;
-                }
-            }
-            let content = `**Username:** \`${interaction.user.username}\`\n**Logged In:** \`${isAuthenticated}\`\n**Server ID:** \`${interaction.guildId}\`\n**TikTok Account Verified:** \`${tiktokVerified}\``;
-            if (email) {
-                content += `\n**Email:** \`${email}\``;
-            }
-            return interaction.reply({
-                content,
+                content: 'Please wait a moment before trying again.', 
                 flags: MessageFlags.Ephemeral
             });
-        } catch (error) {
-            console.error('An error has occurred with the status command:', error);
-            return interaction.reply({ 
-                content: 'Sorry, an error has occurred while trying to retrieve your status. Please try again later.',
-                flags: MessageFlags.Ephemeral 
-            });
         }
-    }
-    
-    // LOGOUT COMMAND
-    if (interaction.commandName === 'logout') {
+
+        // Route commands to their handlers
+        switch (interaction.commandName) {
+            case 'submit':
+                await handleSubmitCommand(interaction);
+                break;
+            case 'campaigns':
+                await handleCampaignsCommand(interaction);
+                break;
+            case 'login':
+                await handleLoginCommand(interaction);
+                break;
+            case 'logout':
+                await handleLogoutCommand(interaction);
+                break;
+            case 'status':
+                await handleStatusCommand(interaction);
+                break;
+            case 'commands':
+                await handleCommandsCommand(interaction);
+                break;
+            case 'link':
+                await handleLinkCommand(interaction);
+                break;
+            default:
+                await interaction.reply({ 
+                    content: 'Unknown command', 
+                    flags: MessageFlags.Ephemeral 
+                });
+        }
+    } catch (error) {
+        console.error('Error handling interaction:', error);
         try {
-            const isAuthenticated = await isUserAuthenticated(discordId);
-            if (!isAuthenticated) {
-                return interaction.reply({
-                    content: 'It looks like you are already logged out. Log in with /login.',
+            if (interaction.deferred) {
+                await interaction.editReply({ 
+                    content: 'An error occurred while processing your command. Please try again later.',
+                    flags: MessageFlags.Ephemeral 
+                });
+            } else if (!interaction.replied) {
+                await interaction.reply({ 
+                    content: 'An error occurred while processing your command. Please try again later.',
                     flags: MessageFlags.Ephemeral 
                 });
             }
-
-            // Find the user document with this Discord ID
-            const userQuery = await db.collection('users')
-                .where('discord_id', '==', sanitizeDiscordId(discordId))
-                .limit(1)
-                .get();
-
-            if (!userQuery.empty) {
-                // Remove the Discord ID from the user document
-                await userQuery.docs[0].ref.update({
-                    discord_id: FieldValue.delete()
-                });
-            }
-
-            await interaction.reply({ content: 'You have been logged out.', flags: MessageFlags.Ephemeral});
-        } catch (error) {
-            console.error('Error logging out:', error);
-            return interaction.reply({ 
-                content: 'Sorry, an error has occurred attempting to log you out. Please try again later.',
-                flags: MessageFlags.Ephemeral 
-            });
-        }
-    }
-
-    // SUBMIT COMMAND
-    if (interaction.commandName === 'submit') {
-        try {
-            // Check if user is authenticated
-            const isAuthenticated = await isUserAuthenticated(discordId);
-            if (!isAuthenticated) {
-                return interaction.reply({ 
-                    content: 'You need to authenticate first. Use the /login command.', 
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const firebaseUserId = await getFirebaseUserId(discordId);
-            if (!firebaseUserId) {
-                return interaction.reply({ 
-                    content: 'You need to link your Discord account first. Use the /login command.', 
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            // Check if TikTok account is verified
-            const userDoc = await db.collection('users').doc(firebaseUserId).get();
-            const userData = userDoc.data();
-            
-            if (!userData?.tiktokVerified) {
-                const errorEmbed = new EmbedBuilder()
-                    .setColor('#FF0000')
-                    .setTitle('❌ TikTok Account Not Verified')
-                    .setDescription('You need to verify your TikTok account before submitting videos. Use the /link command to verify your TikTok account.');
-                
-                return interaction.reply({
-                    embeds: [errorEmbed],
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const campaignId = sanitizeCampaignId(interaction.options.getString('campaign_id'));
-            const videoUrl = sanitizeUrl(interaction.options.getString('video_url'));
-
-            const campaignRef = db.collection('campaigns').doc(campaignId);
-            const campaign = await campaignRef.get();
-            const campaignData = campaign.data();
-
-            if (!campaign.exists) {
-                return interaction.reply({ 
-                    content: 'Campaign not found.', 
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            // Check if campaign is complete
-            if (campaignData.isComplete) {
-                return interaction.reply({ 
-                    content: 'Sorry, this campaign has already ended.', 
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            // Get TikTok video data
-            const videoData = await getTikTokVideoData(videoUrl);
-
-            // Check if required sound is included
-            if (campaignData.requireSound && campaignData.soundId) {
-                const hasRequiredSound = await videoContainsRequiredSound(videoUrl, campaignData);
-                if (!hasRequiredSound) {
-                    const errorEmbed = new EmbedBuilder()
-                        .setColor('#FF0000')  // Red color for errors
-                        .setTitle('❌ Error')
-                        .setDescription(`We've detected this submission does not contain the required sound ID: ${campaignData.soundId}. Please double check your submission or contact your administrator for more information.`);
-                    
-                    return interaction.reply({ 
-                        embeds: [errorEmbed],
-                        flags: MessageFlags.Ephemeral
-                    });
-                }
-            }
-
-            // Check for duplicate submissions
-            const existingVideos = campaignData.videos || [];
-            const isDuplicate = existingVideos.some(video => video.url === videoUrl);
-            
-            if (isDuplicate) {
-                const errorEmbed = new EmbedBuilder()
-                    .setColor('#FF0000')  // Red color for errors
-                    .setTitle('❌ Error')
-                    .setDescription('This video has already been submitted.');
-                
-                return interaction.reply({
-                    embeds: [errorEmbed],
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            // Check max submissions limit
-            if (campaignData.maxSubmissions && campaignData.maxSubmissions !== '' && campaignData.maxSubmissions !== null) {
-                const currentSubmissions = existingVideos.length;
-                if (currentSubmissions >= campaignData.maxSubmissions) {
-                    const errorEmbed = new EmbedBuilder()
-                        .setColor('#FF0000')  // Red color for errors
-                        .setTitle('❌ Error')
-                        .setDescription('Sorry, this campaign has already reached the max number of submissions');
-                    
-                    return interaction.reply({
-                        embeds: [errorEmbed],
-                        flags: MessageFlags.Ephemeral
-                    });
-                }
-            }
-
-            const now = Date.now();
-            const submissionData = {
-                author_id: firebaseUserId,
-                created_at: now,
-                status: 'pending',
-                updated_at: now,
-                url: videoUrl,
-                // Add TikTok video data
-                id: videoData.id,
-                title: videoData.title,
-                author: videoData.author,
-                views: videoData.views,
-                shares: videoData.shares,
-                comments: videoData.comments,
-                likes: videoData.likes,
-                description: videoData.description,
-                createdAt: videoData.createdAt,
-                musicTitle: videoData.musicTitle,
-                musicAuthor: videoData.musicAuthor,
-                musicId: videoData.musicId
-            };
-
-            await campaignRef.update({
-                videos: FieldValue.arrayUnion(submissionData)
-            });
-
-            const successEmbed = new EmbedBuilder()
-                .setColor('#00FF00')  // Green color for success
-                .setTitle('✅ Success')
-                .setDescription('Video added successfully!');
-
-            return interaction.reply({ 
-                embeds: [successEmbed],
-                flags: MessageFlags.Ephemeral
-            });
-        } catch (error) {
-            console.error('Error adding video:', error);
-            let errorMessage = 'There was an error adding your video. ';
-            if (error.message.includes('Invalid')) {
-                errorMessage += error.message;
-            } else {
-                errorMessage += 'Please try again.';
-            }
-
-            const errorEmbed = new EmbedBuilder()
-                .setColor('#FF0000')  // Red color for errors
-                .setTitle('❌ Error')
-                .setDescription(errorMessage);
-            
-            return interaction.reply({ 
-                embeds: [errorEmbed],
-                flags: MessageFlags.Ephemeral
-            });
-        }
-    }
-
-    // CAMPAIGNS COMMAND
-    if (interaction.commandName === 'campaigns') {
-        const isAuthenticated = await isUserAuthenticated(discordId);
-        if (!isAuthenticated) {
-            return interaction.reply({
-                content: 'Please log in to view campaigns with the /login command.',
-                flags: MessageFlags.Ephemeral
-            });
-        }
-
-        const serverId = interaction.guildId;
-        const campaignsSnapshot = await db
-            .collection('campaigns')
-            .where('serverIds', 'array-contains', serverId)
-            .where('isComplete', '==', false)  // Only show non-completed campaigns
-            .limit(10)
-            .get();
-
-        if (campaignsSnapshot.empty) {
-            return interaction.reply({
-                content: 'No active campaigns found for this server. Please contact the server admin for more information.',
-                flags: MessageFlags.Ephemeral
-            });
-        }
-        
-        const embeds = campaignsSnapshot.docs.map(doc => {
-            const data = doc.data();
-            const embed = new EmbedBuilder()
-                .setTitle(data.name || 'Untitled Campaign')
-                .setDescription(`**Campaign ID:** \`${doc.id}\``)
-                .setImage(data.imageUrl);
-
-            let soundSection = '';
-            if (data.soundId && data.soundId.trim() !== '') {
-                soundSection += `**ID:** \`${data.soundId}\`\n`;
-            } else {
-                soundSection += `**ID:** N/A\n`;
-            }
-            if (data.soundUrl && data.soundUrl.trim() !== '') {
-                soundSection += `**URL:** [Listen here](${data.soundUrl})`;
-            } else {
-                soundSection += `**URL:** N/A`;
-            }
-            embed.addFields({ name: "Sound", value: soundSection });
-
-            let notesSection = '';
-            if (data.notes && data.notes.trim() !== '') {
-                notesSection = data.notes;
-            } else {
-                notesSection = "N/A";
-            }
-
-            embed.addFields({ name: "Notes", value: notesSection });
-
-            return embed;
-        });
-
-        const seeAllNote = `Don't see what you're looking for? To see all campaigns, [click here](${process.env.FRONTEND_BASE_URL}/campaigns?serverId=${serverId}).`;
-
-        return interaction.reply({
-            content: seeAllNote,
-            embeds,
-            flags: MessageFlags.Ephemeral 
-        });
-    }
-
-    // Commands Command
-    if (interaction.commandName === 'commands') {
-        const embed = new EmbedBuilder()
-            .setTitle('Available Commands')
-            .setDescription('List of available bot commands and their usage.');
-
-        for (const cmd of commandsList) {
-            // Turn SlashCommandBuilder into a JSON object for easy inspection
-            const { name, description, options } = cmd.toJSON();
-
-            let argString = '';
-            if (options && options.length > 0) {
-                argString = options.map(opt =>
-                    `• \`${opt.name}\`${opt.required ? ' (required)' : ''}: ${opt.description}`
-                ).join('\n');
-            }
-
-            embed.addFields({
-                name: `/${name}`,
-                value: `${description}${argString ? '\n' + argString : ''}`
-            });
-        }
-
-        return interaction.reply({
-            embeds: [embed],
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    if (interaction.commandName === 'link') {
-        try {
-            // Check if user is authenticated
-            const isAuthenticated = await isUserAuthenticated(discordId);
-            if (!isAuthenticated) {
-                return interaction.reply({ 
-                    content: 'You need to authenticate first. Use the /login command.', 
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const firebaseUserId = await getFirebaseUserId(discordId);
-            if (!firebaseUserId) {
-                return interaction.reply({ 
-                    content: 'You need to link your Discord account first. Use the /login command.', 
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-
-            const tiktokUsername = interaction.options.getString('tiktok_username');
-            const linkToken = interaction.options.getString('link_token');
-
-            if (!tiktokUsername || !linkToken) {
-                const errorEmbed = new EmbedBuilder()
-                    .setColor('#FF0000')
-                    .setTitle('❌ Error')
-                    .setDescription('Both TikTok username and link token are required.');
-                
-                return interaction.reply({
-                    embeds: [errorEmbed],
-                    flags: MessageFlags.Ephemeral
-                });
-            }
-            
-            // First reply to acknowledge the command
-            await interaction.deferReply({ ephemeral: true });
-
-            // Link the TikTok account
-            const result = await linkTikTokAccount(tiktokUsername, linkToken);
-            
-            const embed = new EmbedBuilder()
-                .setTitle(result.success ? '✅ Success' : '❌ Error')
-                .setDescription(result.message)
-                .setColor(result.success ? '#00FF00' : '#FF0000');
-
-            if (result.success) {
-                embed.addFields(
-                    { name: 'TikTok Username', value: result.data.uniqueId },
-                    { name: 'Profile', value: result.data.title }
-                );
-            }
-
-            return interaction.editReply({
-                embeds: [embed],
-                flags: MessageFlags.Ephemeral
-            });
-
-        } catch (error) {
-            console.error('Error in link command:', error);
-            const errorEmbed = new EmbedBuilder()
-                .setColor('#FF0000')
-                .setTitle('❌ Error')
-                .setDescription('Failed to link TikTok account. Please try again later.');
-            
-            return interaction.editReply({
-                embeds: [errorEmbed],
-                flags: MessageFlags.Ephemeral
-            });
+        } catch (replyError) {
+            console.error('Error sending error message:', replyError);
         }
     }
 });
 
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-
-    const discordId = message.author.id;
-
-    if (isRateLimited(discordId)) {
-        return message.reply('Please wait a moment before trying again.');
-    }
+// Start the server
+app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+    loginClient();
 });
-
-client.login(process.env.DISCORD_BOT_TOKEN);

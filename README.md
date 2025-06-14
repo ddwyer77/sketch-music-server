@@ -11,3 +11,6 @@
 
 ### Logs
 gcloud app logs tail
+
+### See operations
+gcloud app operations list | cat
