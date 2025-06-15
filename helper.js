@@ -199,94 +199,142 @@ export function checkCampaignCompletionCriteria(campaign) {
     return false;
 }
 
-// Update all campaign metrics
-export async function updateAllCampaignMetrics() {
-    const campaignsSnapshot = await db.collection('campaigns').get();
-    const campaigns = campaignsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-    for (const campaign of campaigns) {
-        // Skip if campaign is already marked as complete
-        if (campaign.isComplete) {
-            continue;
+// Update campaign metrics
+export async function updateCampaignMetrics(campaignIds = null) {
+    try {
+        let campaignsSnapshot;
+        
+        if (campaignIds === null) {
+            // If no campaignIds provided, get all campaigns
+            campaignsSnapshot = await db.collection('campaigns').get();
+        } else if (Array.isArray(campaignIds) && campaignIds.length > 0) {
+            // If specific campaignIds provided, get only those campaigns
+            campaignsSnapshot = await db.collection('campaigns')
+                .where('__name__', 'in', campaignIds)
+                .get();
+        } else {
+            throw new Error('Invalid campaignIds parameter. Must be null or a non-empty array.');
         }
 
-        if (!campaign.videos || !campaign.videos.length) {
-            // If no videos, set all metrics to 0
-            await db.collection('campaigns').doc(campaign.id).update({
-                views: 0,
-                shares: 0,
-                comments: 0,
-                likes: 0,
-                budgetUsed: 0,
-                lastUpdated: Date.now()
-            });
-            continue;
+        const campaigns = campaignsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const results = [];
+
+        for (const campaign of campaigns) {
+            try {
+                // Skip if campaign is already marked as complete
+                if (campaign.isComplete) {
+                    results.push({
+                        campaignId: campaign.id,
+                        status: 'skipped',
+                        reason: 'Campaign already complete'
+                    });
+                    continue;
+                }
+
+                if (!campaign.videos || !campaign.videos.length) {
+                    // If no videos, set all metrics to 0
+                    await db.collection('campaigns').doc(campaign.id).update({
+                        views: 0,
+                        shares: 0,
+                        comments: 0,
+                        likes: 0,
+                        budgetUsed: 0,
+                        lastUpdated: Date.now()
+                    });
+                    results.push({
+                        campaignId: campaign.id,
+                        status: 'success',
+                        message: 'No videos, metrics reset to 0'
+                    });
+                    continue;
+                }
+
+                // Fetch metrics for each video URL in the campaign
+                const metricsPromises = campaign.videos.map(async video => {
+                    const metrics = await getTikTokVideoData(video.url);
+                    // Check if the video's music ID matches the campaign's sound ID
+                    const soundIdMatch = campaign.soundId ? metrics.musicId === campaign.soundId : false;
+                    return { ...metrics, soundIdMatch };
+                });
+                const metricsArray = await Promise.all(metricsPromises);
+
+                // Update videos with sound ID match information and metrics
+                const updatedVideos = campaign.videos.map((video, index) => ({
+                    ...video,
+                    soundIdMatch: metricsArray[index].soundIdMatch,
+                    // Add TikTok metrics to each video
+                    views: metricsArray[index].views || 0,
+                    shares: metricsArray[index].shares || 0,
+                    comments: metricsArray[index].comments || 0,
+                    likes: metricsArray[index].likes || 0,
+                    title: metricsArray[index].title || '',
+                    description: metricsArray[index].description || '',
+                    createdAt: metricsArray[index].createdAt || '',
+                    musicTitle: metricsArray[index].musicTitle || '',
+                    musicAuthor: metricsArray[index].musicAuthor || '',
+                    musicId: metricsArray[index].musicId || '',
+                    author: metricsArray[index].author,
+                    earnings: calculateEarnings(campaign, metricsArray[index].views || 0)
+                }));
+
+                // Calculate total metrics by summing up all video metrics
+                const totalMetrics = updatedVideos.reduce((total, video) => ({
+                    views: total.views + (video.views || 0),
+                    shares: total.shares + (video.shares || 0),
+                    comments: total.comments + (video.comments || 0),
+                    likes: total.likes + (video.likes || 0)
+                }), { views: 0, shares: 0, comments: 0, likes: 0 });
+
+                // Calculate budget used based on total views and campaign rate, rounded to nearest integer
+                const budgetUsed = Math.round((totalMetrics.views / 1000000) * (campaign.ratePerMillion || 0));
+
+                // Check if campaign should be marked as complete based on new metrics
+                const completionStatus = checkCampaignCompletionCriteria({
+                    ...campaign,
+                    budgetUsed,
+                    videos: updatedVideos
+                });
+
+                // Include additional metrics in the update
+                const campaignUpdate = {
+                    views: totalMetrics.views,
+                    shares: totalMetrics.shares,
+                    comments: totalMetrics.comments,
+                    likes: totalMetrics.likes,
+                    budgetUsed,
+                    isComplete: completionStatus,
+                    lastUpdated: Date.now(),
+                    videos: updatedVideos
+                };
+
+                // Update campaign in Firestore
+                await db.collection('campaigns').doc(campaign.id).update(campaignUpdate);
+
+                results.push({
+                    campaignId: campaign.id,
+                    status: 'success',
+                    metrics: totalMetrics,
+                    budgetUsed,
+                    isComplete: completionStatus
+                });
+
+            } catch (error) {
+                console.error(`Error updating metrics for campaign ${campaign.id}:`, error);
+                results.push({
+                    campaignId: campaign.id,
+                    status: 'error',
+                    error: error.message
+                });
+            }
         }
 
-        try {
-            // Fetch metrics for each video URL in the campaign
-            const metricsPromises = campaign.videos.map(async video => {
-                const metrics = await getTikTokVideoData(video.url);
-                // Check if the video's music ID matches the campaign's sound ID
-                const soundIdMatch = campaign.soundId ? metrics.musicId === campaign.soundId : false;
-                return { ...metrics, soundIdMatch };
-            });
-            const metricsArray = await Promise.all(metricsPromises);
-
-            // Update videos with sound ID match information and metrics
-            const updatedVideos = campaign.videos.map((video, index) => ({
-                ...video,
-                soundIdMatch: metricsArray[index].soundIdMatch,
-                // Add TikTok metrics to each video
-                views: metricsArray[index].views || 0,
-                shares: metricsArray[index].shares || 0,
-                comments: metricsArray[index].comments || 0,
-                likes: metricsArray[index].likes || 0,
-                title: metricsArray[index].title || '',
-                description: metricsArray[index].description || '',
-                createdAt: metricsArray[index].createdAt || '',
-                musicTitle: metricsArray[index].musicTitle || '',
-                musicAuthor: metricsArray[index].musicAuthor || '',
-                musicId: metricsArray[index].musicId || '',
-                author: metricsArray[index].author,
-                earnings: calculateEarnings(campaign, metricsArray[index].views || 0)
-            }));
-
-            // Calculate total metrics by summing up all video metrics
-            const totalMetrics = updatedVideos.reduce((total, video) => ({
-                views: total.views + (video.views || 0),
-                shares: total.shares + (video.shares || 0),
-                comments: total.comments + (video.comments || 0),
-                likes: total.likes + (video.likes || 0)
-            }), { views: 0, shares: 0, comments: 0, likes: 0 });
-
-            // Calculate budget used based on total views and campaign rate, rounded to nearest integer
-            const budgetUsed = Math.round((totalMetrics.views / 1000000) * (campaign.ratePerMillion || 0));
-
-            // Check if campaign should be marked as complete based on new metrics
-            const completionStatus = checkCampaignCompletionCriteria({
-                ...campaign,
-                budgetUsed,
-                videos: updatedVideos
-            });
-
-            // Include additional metrics in the update
-            const campaignUpdate = {
-                views: totalMetrics.views,      // Sum of all video.views
-                shares: totalMetrics.shares,    // Sum of all video.shares
-                comments: totalMetrics.comments, // Sum of all video.comments
-                likes: totalMetrics.likes,      // Sum of all video.likes
-                budgetUsed,
-                isComplete: completionStatus,
-                lastUpdated: Date.now(),
-                videos: updatedVideos
-            };
-
-            // Update campaign in Firestore
-            await db.collection('campaigns').doc(campaign.id).update(campaignUpdate);
-        } catch (error) {
-            console.error(`Error updating metrics for campaign ${campaign.id}:`, error);
-        }
+        return {
+            success: true,
+            results
+        };
+    } catch (error) {
+        console.error('Error in updateCampaignMetrics:', error);
+        throw error;
     }
 }
 
@@ -294,11 +342,6 @@ export function calculateEarnings(campaign, views) {
     // Input validation
     if (!campaign || typeof views !== 'number' || isNaN(views)) {
         console.error('Invalid input to calculateEarnings:', { campaign, views });
-        return 0;
-    }
-
-    // For completed campaigns, return 0 as no new earnings should be calculated
-    if (campaign.isComplete) {
         return 0;
     }
 
@@ -439,6 +482,21 @@ export async function linkTikTokAccount(tiktokUsername, linkToken) {
             message: 'Failed to verify TikTok account. Please try again later.',
             error: error.message
         };
+    }
+}
+
+// Helper function to get user by ID
+export async function getUserById(userId) {
+    try {
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (!userDoc.exists) {
+            console.warn(`User not found with ID: ${userId}`);
+            return null;
+        }
+        return { id: userDoc.id, ...userDoc.data() };
+    } catch (error) {
+        console.error(`Error fetching user ${userId}:`, error);
+        return null;
     }
 }
 

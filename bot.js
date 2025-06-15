@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { db, FieldValue } from './firebaseAdmin.js';
-import { updateAllCampaignMetrics, linkTikTokAccount } from './helper.js';
+import { updateCampaignMetrics, linkTikTokAccount, getUserById } from './helper.js';
 import { payCreator, calculatePendingCampaignPayments } from './payments.js';
 import { updateActiveCampaigns } from './discordCampaignManager.js';
 import { 
@@ -128,8 +128,10 @@ app.post('/api/discord/update-active-campaigns', async (req, res) => {
 // Add API endpoint to update all campaign metrics
 app.post('/api/update-metrics', async (req, res) => {
     try {
-        await updateAllCampaignMetrics();
-        res.status(200).json({ message: 'Metrics updated successfully' });
+        // Handle case where req.body is undefined
+        const campaignIds = req.body?.campaignIds;
+        const result = await updateCampaignMetrics(campaignIds || null);
+        res.status(200).json(result);
     } catch (error) {
         console.error('Error updating campaign metrics:', error);
         res.status(500).json({ error: 'Failed to update campaign metrics', details: error.message });
@@ -198,7 +200,7 @@ app.post('/api/generate-social-media-account-link-token', async (req, res) => {
 // Pay Creators 
 app.post('/pay-creators', async (req, res) => {
     try {
-        const { userIds, campaignId } = req.body;
+        const { userIds, campaignId, actorId } = req.body;
         
         if (!userIds || !Array.isArray(userIds)) {
             return res.status(400).json({ error: 'userIds must be an array' });
@@ -206,6 +208,16 @@ app.post('/pay-creators', async (req, res) => {
         
         if (!campaignId) {
             return res.status(400).json({ error: 'campaignId is required' });
+        }
+
+        if (!actorId) {
+            return res.status(400).json({ error: 'actorId is required' });
+        }
+
+        // Fetch actor user data
+        const actorUser = await getUserById(actorId);
+        if (!actorUser) {
+            return res.status(404).json({ error: 'Actor user not found' });
         }
 
         // Fetch users from DB
@@ -227,16 +239,31 @@ app.post('/pay-creators', async (req, res) => {
         }
 
         const payments = await calculatePendingCampaignPayments(campaign);
-        await payCreator(payments);
+        const result = await payCreator(payments, {
+            actorId,
+            actorName: `${actorUser.first_name || ''} ${actorUser.last_name || ''}`.trim() || 'Unknown User'
+        });
+        
+        // Check if any payments failed
+        const failedPayments = result.filter(payment => !payment.hasBeenPaid);
+        if (failedPayments.length > 0) {
+            return res.status(500).json({ 
+                success: false,
+                message: 'Some payments failed to process',
+                failedPayments,
+                successfulPayments: result.filter(payment => payment.hasBeenPaid)
+            });
+        }
         
         res.status(200).json({ 
             success: true, 
-            message: 'Payments processed successfully',
-            payments 
+            message: 'All payments processed successfully',
+            payments: result
         });
     } catch (error) {
         console.error('Error processing payments:', error);
         res.status(500).json({ 
+            success: false,
             error: 'Failed to process payments',
             details: error.message 
         });
@@ -248,7 +275,7 @@ cron.schedule('0 * * * *', async () => {
     console.log('Running scheduled campaign metrics update...');
     try {
         // Update all campaign metrics
-        await updateAllCampaignMetrics();
+        await updateCampaignMetrics();
         console.log('Scheduled metrics update completed.');
 
         // Only update Discord channels if the client is ready

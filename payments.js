@@ -1,5 +1,6 @@
-import { calculateEarnings } from './helper.js';
+import { calculateEarnings, updateCampaignMetrics } from './helper.js';
 import { db } from './firebaseAdmin.js';
+import axios from 'axios';
 
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
 const PAYPAL_SECRET_KEY = process.env.PAYPAL_SECRET_KEY;
@@ -55,9 +56,12 @@ async function sendPayoutBatch(recipients) {
   return response.data;
 }
 
-async function calculatePendingCampaignPayments(campaign) {
+export async function calculatePendingCampaignPayments(campaign) {
     try {
         let result = [];
+
+        // Metrics for campaign is updated before submitting request
+        
         const campaignVideos = campaign.videos || [];
         
         // Get all unique author IDs
@@ -95,7 +99,7 @@ async function calculatePendingCampaignPayments(campaign) {
                 creatorEmail: userData.email || '',
                 creatorPaymentEmail: userData.paymentEmail || '',
                 amount: amountOwed,
-                hasBeenPaid: video.hasBeenPaid || false,
+                hasBeenPaid: video.hasBeenPaid,
                 campaign
             });
         }
@@ -107,9 +111,10 @@ async function calculatePendingCampaignPayments(campaign) {
     }
 }
 
-async function payCreator(payments) {
+export async function payCreator(payments, { actorId, actorName }) {
     try {
         let receipt = [];
+        let hasErrors = false;
         
         // Group payments by creator to avoid multiple PayPal transactions
         const creatorPayments = new Map();
@@ -150,6 +155,11 @@ async function payCreator(payments) {
                 // Send PayPal payout
                 const payoutResult = await sendPayoutBatch([payoutData]);
 
+                // Verify PayPal response
+                if (!payoutResult || !payoutResult.batch_header || !payoutResult.batch_header.payout_batch_id) {
+                    throw new Error('Invalid PayPal response');
+                }
+
                 // Create ledger entry
                 const ledgerEntry = {
                     targetUserId: creatorId,
@@ -157,8 +167,8 @@ async function payCreator(payments) {
                     amount: payment.totalAmount,
                     type: "campaignIncome",
                     source: "videoViews",
-                    actorId: "system", // or pass admin user ID from context
-                    actorName: "System", // or pass admin name from context
+                    actorId: actorId,
+                    actorName: actorName,
                     metadata: {
                         videoIds: payment.videos.map(v => v.videoId),
                         views: payment.videos.map(v => v.views),
@@ -178,7 +188,12 @@ async function payCreator(payments) {
                         .doc(payment.campaign.id)
                         .collection('videos')
                         .doc(video.videoId);
-                    batch.update(videoRef, { hasBeenPaid: true });
+                    batch.update(videoRef, { 
+                        hasBeenPaid: true,
+                        payoutAmountForVideo: video.amount,
+                        paidBy: actorId,
+                        paidByName: actorName
+                     });
                 });
                 await batch.commit();
 
@@ -191,10 +206,13 @@ async function payCreator(payments) {
                     hasBeenPaid: true,
                     amount: payment.totalAmount,
                     result: "Payment sent successfully",
-                    payoutBatchId: payoutResult.batch_header.payout_batch_id
+                    payoutBatchId: payoutResult.batch_header.payout_batch_id,
+                    paidBy: actorId,
+                    paidByName: actorName
                 });
 
             } catch (error) {
+                hasErrors = true;
                 console.error(`Error processing payment for creator ${creatorId}:`, error);
                 receipt.push({
                     creatorId: creatorId,
@@ -209,9 +227,13 @@ async function payCreator(payments) {
             }
         }
 
+        if (hasErrors) {
+            throw new Error('One or more payments failed to process');
+        }
+
         return receipt;
     } catch (error) {
         console.error('Error in payCreator:', error);
-        throw new Error('Failed to process payments: ' + error.message);
+        throw error;
     }
 }
