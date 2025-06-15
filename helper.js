@@ -249,7 +249,7 @@ export async function updateAllCampaignMetrics() {
                 musicAuthor: metricsArray[index].musicAuthor || '',
                 musicId: metricsArray[index].musicId || '',
                 author: metricsArray[index].author,
-                earnings: calculateEarnings(campaign, metricsArray[index].views || 0, video.earnings)
+                earnings: calculateEarnings(campaign, metricsArray[index].views || 0)
             }));
 
             // Calculate total metrics by summing up all video metrics
@@ -290,16 +290,16 @@ export async function updateAllCampaignMetrics() {
     }
 }
 
-function calculateEarnings(campaign, views, currentEarnings = 0) {
+export function calculateEarnings(campaign, views) {
     // Input validation
     if (!campaign || typeof views !== 'number' || isNaN(views)) {
         console.error('Invalid input to calculateEarnings:', { campaign, views });
         return 0;
     }
 
-    // For completed campaigns, return existing earnings if available
+    // For completed campaigns, return 0 as no new earnings should be calculated
     if (campaign.isComplete) {
-        return typeof currentEarnings === 'number' ? currentEarnings : 0;
+        return 0;
     }
 
     // Ensure ratePerMillion is a valid number
@@ -448,5 +448,5 @@ export {
     sanitizeToken,
     sanitizeUrl,
     sanitizeCampaignId,
-    sanitizeTikTokId    
+    sanitizeTikTokId
 }; 

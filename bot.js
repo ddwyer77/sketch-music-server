@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { db, FieldValue } from './firebaseAdmin.js';
 import { updateAllCampaignMetrics, linkTikTokAccount } from './helper.js';
+import { payCreator, calculatePendingCampaignPayments } from './payments.js';
 import { updateActiveCampaigns } from './discordCampaignManager.js';
 import { 
     client, 
@@ -191,6 +192,54 @@ app.post('/api/generate-social-media-account-link-token', async (req, res) => {
     } catch (error) {
         console.error('Error generating social media account link token:', error);
         res.status(500).json({ error: 'Failed to generate token', details: error.message });
+    }
+});
+
+// Pay Creators 
+app.post('/pay-creators', async (req, res) => {
+    try {
+        const { userIds, campaignId } = req.body;
+        
+        if (!userIds || !Array.isArray(userIds)) {
+            return res.status(400).json({ error: 'userIds must be an array' });
+        }
+        
+        if (!campaignId) {
+            return res.status(400).json({ error: 'campaignId is required' });
+        }
+
+        // Fetch users from DB
+        const users = await Promise.all(userIds.map(getUserById));
+        const validUsers = users.filter(u => u && u.paymentEmail);
+
+        if (validUsers.length === 0) {
+            return res.status(400).json({ error: 'One or more users has not added an email address for payment.' });
+        }
+
+        const campaignDoc = await db.collection('campaigns').doc(campaignId).get();
+        if (!campaignDoc.exists) {
+            return res.status(404).json({ error: 'Campaign not found' });
+        }
+
+        const campaign = campaignDoc.data();
+        if (!campaign.videos || campaign.videos.length === 0) {
+            return res.status(400).json({ error: 'There are no videos submitted for this campaign' });
+        }
+
+        const payments = await calculatePendingCampaignPayments(campaign);
+        await payCreator(payments);
+        
+        res.status(200).json({ 
+            success: true, 
+            message: 'Payments processed successfully',
+            payments 
+        });
+    } catch (error) {
+        console.error('Error processing payments:', error);
+        res.status(500).json({ 
+            error: 'Failed to process payments',
+            details: error.message 
+        });
     }
 });
 

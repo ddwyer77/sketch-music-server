@@ -195,7 +195,8 @@ const handleSubmitCommand = async (interaction) => {
             createdAt: videoData.createdAt,
             musicTitle: videoData.musicTitle,
             musicAuthor: videoData.musicAuthor,
-            musicId: videoData.musicId
+            musicId: videoData.musicId,
+            hasBeenPaid: false
         };
 
         await campaignRef.update({
