@@ -1,5 +1,5 @@
 import { calculateEarnings, updateCampaignMetrics } from './helper.js';
-import { db } from './firebaseAdmin.js';
+import { db, FieldValue } from './firebaseAdmin.js';
 import axios from 'axios';
 
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
