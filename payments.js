@@ -56,12 +56,46 @@ async function sendPayoutBatch(recipients) {
   return response.data;
 }
 
+function aggregatePaymentDataPerUser(videos, userMap) {
+    const userAggregates = new Map();
+
+    for (const video of videos) {
+        const userData = userMap.get(video.author_id);
+        if (!userData) {
+            console.warn(`User not found for video author_id: ${video.author_id}`);
+            continue;
+        }
+
+        const amountOwed = video.hasBeenPaid ? 0 : calculateEarnings(video.campaign, video.views);
+        
+        if (!userAggregates.has(video.author_id)) {
+            userAggregates.set(video.author_id, {
+                creatorId: video.author_id,
+                creatorFirstName: userData.first_name || '',
+                creatorLastName: userData.last_name || '',
+                creatorEmail: userData.email || '',
+                creatorPaymentEmail: userData.paymentEmail || '',
+                totalAmount: 0,
+                videos: []
+            });
+        }
+
+        const userAggregate = userAggregates.get(video.author_id);
+        userAggregate.totalAmount += amountOwed;
+        userAggregate.videos.push({
+            videoId: video.id,
+            views: video.views,
+            amount: amountOwed,
+            hasBeenPaid: video.hasBeenPaid
+        });
+    }
+
+    return Array.from(userAggregates.values());
+}
+
 export async function calculatePendingCampaignPayments(campaign) {
     try {
-        let result = [];
-
         // Metrics for campaign is updated before submitting request
-        
         const campaignVideos = campaign.videos || [];
         
         // Get all unique author IDs
@@ -81,28 +115,8 @@ export async function calculatePendingCampaignPayments(campaign) {
             }
         });
 
-        // Process each video
-        for (const video of campaignVideos) {
-            const userData = userMap.get(video.author_id);
-            
-            if (!userData) {
-                console.warn(`User not found for video author_id: ${video.author_id}`);
-                continue;
-            }
-
-            const amountOwed = video.hasBeenPaid ? 0 : calculateEarnings(campaign, video.views);
-            
-            result.push({
-                creatorId: video.author_id,
-                creatorFirstName: userData.first_name || '',
-                creatorLastName: userData.last_name || '',
-                creatorEmail: userData.email || '',
-                creatorPaymentEmail: userData.paymentEmail || '',
-                amount: amountOwed,
-                hasBeenPaid: video.hasBeenPaid,
-                campaign
-            });
-        }
+        // Aggregate payment data per user
+        const result = aggregatePaymentDataPerUser(campaignVideos, userMap);
 
         return result;
     } catch (error) {
@@ -116,40 +130,24 @@ export async function payCreator(payments, { actorId, actorName }) {
         let receipt = [];
         let hasErrors = false;
         
-        // Group payments by creator to avoid multiple PayPal transactions
-        const creatorPayments = new Map();
-        payments.forEach(payment => {
-            if (!payment.hasBeenPaid && payment.amount > 0) {
-                const existing = creatorPayments.get(payment.creatorId) || {
-                    creatorId: payment.creatorId,
-                    creatorFirstName: payment.creatorFirstName,
-                    creatorLastName: payment.creatorLastName,
-                    creatorEmail: payment.creatorEmail,
-                    creatorPaymentEmail: payment.creatorPaymentEmail,
-                    totalAmount: 0,
-                    videos: [],
-                    campaign: payment.campaign
-                };
-                
-                existing.totalAmount += payment.amount;
-                existing.videos.push({
-                    videoId: payment.videoId,
-                    views: payment.views,
-                    amount: payment.amount
-                });
-                
-                creatorPayments.set(payment.creatorId, existing);
-            }
-        });
-
-        // Process each creator's payment
-        for (const [creatorId, payment] of creatorPayments) {
+        // Process each user's payment
+        for (const payment of payments) {
             try {
+                // Skip if no amount to pay
+                if (payment.totalAmount <= 0) {
+                    receipt.push({
+                        ...payment,
+                        hasBeenPaid: true,
+                        result: "No payment needed - amount is 0"
+                    });
+                    continue;
+                }
+
                 // Prepare PayPal payout
                 const payoutData = {
                     paymentEmail: payment.creatorPaymentEmail,
                     payoutAmount: payment.totalAmount.toFixed(2),
-                    id: creatorId
+                    id: payment.creatorId
                 };
 
                 // Send PayPal payout
@@ -160,10 +158,10 @@ export async function payCreator(payments, { actorId, actorName }) {
                     throw new Error('Invalid PayPal response');
                 }
 
-                // Create ledger entry
-                const ledgerEntry = {
-                    targetUserId: creatorId,
-                    campaignId: payment.campaign.id,
+                // Create transaction entry
+                const transactionEntry = {
+                    targetUserId: payment.creatorId,
+                    campaignId: payment.videos[0].campaign.id, // All videos are from same campaign
                     amount: payment.totalAmount,
                     type: "campaignIncome",
                     source: "videoViews",
@@ -172,20 +170,20 @@ export async function payCreator(payments, { actorId, actorName }) {
                     metadata: {
                         videoIds: payment.videos.map(v => v.videoId),
                         views: payment.videos.map(v => v.views),
-                        ratePerMillion: payment.campaign.ratePerMillion || 0,
+                        ratePerMillion: payment.videos[0].campaign.ratePerMillion || 0,
                         payoutBatchId: payoutResult.batch_header.payout_batch_id,
                         timestamp: FieldValue.serverTimestamp()
                     }
                 };
 
-                // Add to ledger
-                await db.collection('ledger').add(ledgerEntry);
+                // Add to transactions
+                await db.collection('transactions').add(transactionEntry);
 
-                // Update video payment status
+                // Update all videos for this user as paid
                 const batch = db.batch();
                 payment.videos.forEach(video => {
                     const videoRef = db.collection('campaigns')
-                        .doc(payment.campaign.id)
+                        .doc(video.campaign.id)
                         .collection('videos')
                         .doc(video.videoId);
                     batch.update(videoRef, { 
@@ -193,12 +191,12 @@ export async function payCreator(payments, { actorId, actorName }) {
                         payoutAmountForVideo: video.amount,
                         paidBy: actorId,
                         paidByName: actorName
-                     });
+                    });
                 });
                 await batch.commit();
 
                 receipt.push({
-                    creatorId: creatorId,
+                    creatorId: payment.creatorId,
                     creatorFirstName: payment.creatorFirstName,
                     creatorLastName: payment.creatorLastName,
                     creatorEmail: payment.creatorEmail,
@@ -213,9 +211,9 @@ export async function payCreator(payments, { actorId, actorName }) {
 
             } catch (error) {
                 hasErrors = true;
-                console.error(`Error processing payment for creator ${creatorId}:`, error);
+                console.error(`Error processing payment for creator ${payment.creatorId}:`, error);
                 receipt.push({
-                    creatorId: creatorId,
+                    creatorId: payment.creatorId,
                     creatorFirstName: payment.creatorFirstName,
                     creatorLastName: payment.creatorLastName,
                     creatorEmail: payment.creatorEmail,

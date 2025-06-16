@@ -214,8 +214,15 @@ const handleSubmitCommand = async (interaction) => {
     } catch (error) {
         console.error('Error adding video:', error);
         let errorMessage = 'There was an error adding your video. ';
+        
         if (error.message.includes('Invalid')) {
             errorMessage += error.message;
+        } else if (error.message.includes('Could not extract video ID')) {
+            if (error.message.includes('/photo/')) {
+                errorMessage = '❌ Error: You have submitted a TikTok photo instead of a video. Please submit a video URL instead.';
+            } else {
+                errorMessage = '❌ Error: Invalid TikTok URL. Please make sure you are submitting a valid TikTok video URL.';
+            }
         } else {
             errorMessage += 'Please try again.';
         }
