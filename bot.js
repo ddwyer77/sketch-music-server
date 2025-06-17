@@ -237,11 +237,11 @@ app.post('/pay-creators', async (req, res) => {
         if (!campaign.videos || campaign.videos.length === 0) {
             return res.status(400).json({ error: 'There are no videos submitted for this campaign' });
         }
-
+        
         const payments = await calculatePendingCampaignPayments(campaign);
-        const result = await payCreator(payments, {
+        const result = await payCreator(payments, campaign, {
             actorId,
-            actorName: `${actorUser.first_name || ''} ${actorUser.last_name || ''}`.trim() || 'Unknown User'
+            actorName: `${actorUser.firstName || ''} ${actorUser.lastName || ''}`.trim() || 'Unknown User'
         });
         
         // Check if any payments failed
