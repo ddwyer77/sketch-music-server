@@ -239,7 +239,7 @@ app.post('/pay-creators', async (req, res) => {
         }
         
         const payments = await calculatePendingCampaignPayments(campaign, userIds);
-        const result = await payCreator(payments, campaign, {
+        const result = await payCreator(payments, campaignDoc.id, {
             actorId,
             actorName: `${actorUser.firstName || ''} ${actorUser.lastName || ''}`.trim() || 'Unknown User'
         });

@@ -133,11 +133,13 @@ export async function calculatePendingCampaignPayments(campaign, usersToBePaid) 
     }
 }
 
-export async function payCreator(payments, campaign, { actorId, actorName }) {
+export async function payCreator(payments, campaignId, { actorId, actorName }) {
     try {
         let hasErrors = false;
+        const campaignDoc = await db.collection('campaigns').doc(campaignId).get();
+        const campaignRef = campaignDoc.ref; 
+        const campaign = campaignDoc.data();
         const pendingPayments = payments.pendingPayments;
-        const campaignId = campaign.id;
         const processedPayments = []; // Track successful payments for potential rollback
         
         // Process each user's payment
@@ -163,8 +165,6 @@ export async function payCreator(payments, campaign, { actorId, actorName }) {
                 }
 
                 // Pre-validate all videos exist in database
-                const campaignDoc = await db.collection('campaigns').doc(campaignId).get();
-                const campaignRef = campaignDoc.ref; 
 
                 if (!campaignDoc.exists) {
                     throw new Error(`Campaign ${campaignId} not found`);
@@ -189,7 +189,7 @@ export async function payCreator(payments, campaign, { actorId, actorName }) {
                     targetUserId: payment.payeeId,
                     targetFirstName: payment.firstName,
                     targetLastName: payment.lastName,
-                    campaignId: campaign.id,
+                    campaignId: campaignId,
                     amount: payment.amountOwed,
                     type: "creatorPayout",
                     source: "videoViews",
