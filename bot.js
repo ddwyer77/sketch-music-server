@@ -238,27 +238,24 @@ app.post('/pay-creators', async (req, res) => {
             return res.status(400).json({ error: 'There are no videos submitted for this campaign' });
         }
         
-        const payments = await calculatePendingCampaignPayments(campaign);
+        const payments = await calculatePendingCampaignPayments(campaign, userIds);
         const result = await payCreator(payments, campaign, {
             actorId,
             actorName: `${actorUser.firstName || ''} ${actorUser.lastName || ''}`.trim() || 'Unknown User'
         });
         
-        // Check if any payments failed
-        const failedPayments = result.filter(payment => !payment.hasBeenPaid);
-        if (failedPayments.length > 0) {
+        if (!result.success) {
             return res.status(500).json({ 
                 success: false,
-                message: 'Some payments failed to process',
-                failedPayments,
-                successfulPayments: result.filter(payment => payment.hasBeenPaid)
+                message: 'Failed to process payments',
+                details: result.error || 'Unknown error'
             });
         }
         
         res.status(200).json({ 
             success: true, 
             message: 'All payments processed successfully',
-            payments: result
+            processedPayments: result.processedPayments
         });
     } catch (error) {
         console.error('Error processing payments:', error);

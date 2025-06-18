@@ -56,16 +56,19 @@ async function sendPayoutBatch(recipients) {
     return response.data;
 }
 
-export async function calculatePendingCampaignPayments(campaign) {
+export async function calculatePendingCampaignPayments(campaign, usersToBePaid) {
     try {
         // Metrics for campaign is updated before submitting request on front end
         let userPayoutData = {};
         const videos = campaign.videos || [];
         let unpaidVideos = [];
 
-        videos.forEach(video => {
+        for (const video of videos) {
             const earningsForThisVideo = video.earnings;
             const authorId = video.author_id;
+            if (!usersToBePaid.includes(authorId)) {
+                continue;
+            }
 
             // Check for conditions that would prevent payment
             if (video.status !== "approved") {
@@ -99,7 +102,7 @@ export async function calculatePendingCampaignPayments(campaign) {
                     };
                 }
             }
-        });
+        }
 
         // Add user doc data to each payout entry
         const userIds = Object.keys(userPayoutData);
@@ -135,9 +138,15 @@ export async function payCreator(payments, campaign, { actorId, actorName }) {
         let hasErrors = false;
         const pendingPayments = payments.pendingPayments;
         const campaignId = campaign.id;
+        const processedPayments = []; // Track successful payments for potential rollback
         
         // Process each user's payment
         for (const payment of pendingPayments) {
+            let transactionId = null;
+            let receiptCreated = false;
+            let videosUpdated = false;
+            let payoutBatchId = null;
+            
             try {
                 // Skip if no amount to pay
                 if (payment.amountOwed <= 0) {
@@ -145,94 +154,69 @@ export async function payCreator(payments, campaign, { actorId, actorName }) {
                     continue;
                 }
 
-                // Prepare PayPal payout
-                const payoutData = {
-                    paymentEmail: payment.paymentEmail,
-                    payoutAmount: payment.amountOwed.toFixed(2),
-                    id: payment.payeeId
-                };
+                const reconciliationId = `PAY-${Date.now()}-${payment.payeeId}`;
 
-                // Send PayPal payout
-                const payoutResult = await sendPayoutBatch([payoutData]);
-
-                // Verify PayPal response
-                if (!payoutResult || !payoutResult.batch_header || !payoutResult.batch_header.payout_batch_id) {
-                    throw new Error('Invalid PayPal response');
+                // PHASE 1: Prepare all data and validate everything BEFORE sending money
+                // Validate payment data
+                if (!payment.paymentEmail || !payment.payeeId || payment.amountOwed <= 0) {
+                    throw new Error('Invalid payment data');
                 }
 
-                // Create transaction entry
-                // TODO: This is failing at db.collection
-                // TODO: add target user name
-                // TODO: make sure everything is correct before adding to db so that transaction doesn't get added if something else fails, or
-                // payment goes out but transaction fails.
+                // Pre-validate all videos exist in database
+                const campaignDoc = await db.collection('campaigns').doc(campaignId).get();
+                const campaignRef = campaignDoc.ref; 
 
-                let transactionEntry = {
+                if (!campaignDoc.exists) {
+                    throw new Error(`Campaign ${campaignId} not found`);
+                }
+                const campaignVideos = campaignDoc.data().videos || [];
+                const videoRefs = [];
+                
+                for (const video of payment.videos) {
+                    const matchingVideos = campaignVideos.filter(v => v.url === video.url);
+                    if (matchingVideos.length !== 1) {
+                        throw new Error(`Video with URL ${video.url} ${matchingVideos.length === 0 ? 'not found' : 'has duplicates'} in campaign ${campaignId}`);
+                    }
+                    
+                    videoRefs.push({
+                        campaignRef: campaignDoc.ref,
+                        video: matchingVideos[0]
+                    });
+                }
+
+                // Prepare all database objects BEFORE sending money
+                const transactionEntry = {
                     targetUserId: payment.payeeId,
-                    // target user name
+                    targetFirstName: payment.firstName,
+                    targetLastName: payment.lastName,
                     campaignId: campaign.id,
                     amount: payment.amountOwed,
                     type: "creatorPayout",
                     source: "videoViews",
                     actorId: actorId,
                     actorName: actorName,
-                    status: "completed",
+                    status: "pending", // Start as pending
                     currency: "USD",
                     paymentMethod: "paypal",
-                    paymentReference: payoutResult.batch_header.payout_batch_id,
+                    paymentReference: null, // Will be updated after PayPal
                     createdAt: FieldValue.serverTimestamp(),
                     isTestPayment: PAYPAL_API_BASE === "https://api.sandbox.paypal.com",
                     metadata: {
                         videoIds: payment.videos.map(v => v.id),
                         views: payment.videos.map(v => v.views),
                         ratePerMillion: campaign.ratePerMillion || 0,
-                        payoutBatchId: payoutResult.batch_header.payout_batch_id,
+                        payoutBatchId: null, // Will be updated after PayPal
                         timestamp: FieldValue.serverTimestamp(),
                         paymentEmail: payment.paymentEmail,
                         videoCount: payment.videos.length,
                         totalViews: payment.videos.reduce((sum, v) => sum + (v.views || 0), 0),
                         platformFee: 0,
                         netAmount: payment.amountOwed,
-                        paymentStatus: "completed",
-                        reconciliationId: `PAY-${Date.now()}-${payment.payeeId}`
+                        paymentStatus: "pending",
+                        reconciliationId: reconciliationId
                     }
                 };
 
-                await db.collection('transactions').add(transactionEntry);
-
-                // Mark videos as paid
-                const batch = db.batch();
-                for (const video of payment.videos) {
-                    // Query to find the actual Firestore document by URL
-                    const videoQuery = await db.collection('campaigns')
-                        .doc(campaignId)
-                        .collection('videos')
-                        .where('url', '==', video.url)
-                        .get();
-                    
-                    if (videoQuery.empty) {
-                        console.warn(`Video with URL ${video.url} not found in campaign ${campaignId}`);
-                        continue;
-                    }
-                    
-                    if (videoQuery.docs.length > 1) {
-                        console.error(`CRITICAL: Multiple videos found with same URL ${video.url} in campaign ${campaignId}`);
-                        throw new Error(`Duplicate video URLs found - cannot safely process payment`);
-                    }
-                    
-                    // Get the actual Firestore document reference
-                    const videoRef = videoQuery.docs[0].ref;
-                    
-                    batch.update(videoRef, { 
-                        hasBeenPaid: true,
-                        payoutAmountForVideo: video.earnings,
-                        paidBy: actorId,
-                        paidByName: actorName,
-                        paidAt: FieldValue.serverTimestamp()
-                    });
-                }
-                await batch.commit();
-
-                // Create receipt
                 const receipt = {
                     receiptId: `REC-${Date.now()}-${payment.payeeId}`,
                     campaignId: campaignId,
@@ -246,10 +230,10 @@ export async function payCreator(payments, campaign, { actorId, actorName }) {
                     payment: {
                         amount: payment.amountOwed,
                         currency: "USD",
-                        status: "completed",
+                        status: "pending", // Start as pending
                         method: "paypal",
-                        batchId: payoutResult.batch_header.payout_batch_id,
-                        timestamp: FieldValue.serverTimestamp()
+                        batchId: null, // Will be updated after PayPal
+                        timestamp: new Date()
                     },
                     videos: {
                         paid: payment.videos.map(video => ({
@@ -273,20 +257,113 @@ export async function payCreator(payments, campaign, { actorId, actorName }) {
                             id: actorId,
                             name: actorName
                         },
-                        transactionId: transactionEntry.metadata.reconciliationId,
-                        paymentReference: payoutResult.batch_header.payout_batch_id
+                        transactionId: reconciliationId,
+                        paymentReference: null // Will be updated after PayPal
                     }
                 };
 
-                // Add receipt to campaign document
-                const campaignRef = db.collection('campaigns').doc(campaignId);
+                // PHASE 2: Create transaction record as "pending" BEFORE sending money
+                const transactionRef = await db.collection('transactions').add(transactionEntry);
+                transactionId = transactionRef.id;
+
+                // PHASE 3: Send PayPal payout (the critical step)
+                const payoutData = {
+                    paymentEmail: payment.paymentEmail,
+                    payoutAmount: payment.amountOwed.toFixed(2),
+                    id: payment.payeeId
+                };
+
+                const payoutResult = await sendPayoutBatch([payoutData]);
+
+                // Verify PayPal response
+                if (!payoutResult || !payoutResult.batch_header || !payoutResult.batch_header.payout_batch_id) {
+                    throw new Error('Invalid PayPal response');
+                }
+
+                payoutBatchId = payoutResult.batch_header.payout_batch_id;
+
+                // PHASE 4: Update transaction to "completed" now that money was sent
+                await transactionRef.update({
+                    status: "completed",
+                    paymentReference: payoutBatchId,
+                    'metadata.payoutBatchId': payoutBatchId,
+                    'metadata.paymentStatus': "completed",
+                    completedAt: FieldValue.serverTimestamp()
+                });
+
+                // PHASE 5: Mark videos as paid
+                const updatedCampaignVideos = [...campaignVideos];
+                for (const video of payment.videos) {
+                    const videoIndex = updatedCampaignVideos.findIndex(v => v.url === video.url);
+                    updatedCampaignVideos[videoIndex] = {
+                        ...updatedCampaignVideos[videoIndex],
+                        hasBeenPaid: true,
+                        payoutAmountForVideo: video.earnings,
+                        paidBy: actorId,
+                        paidByName: actorName,
+                        paidAt: new Date(),
+                        payoutBatchId: payoutBatchId
+                    };
+                }
+                await campaignRef.update({
+                    videos: updatedCampaignVideos
+                });
+                videosUpdated = true;
+
+                // PHASE 6: Create receipt with final PayPal info
+                receipt.payment.status = "completed";
+                receipt.payment.batchId = payoutBatchId;
+                receipt.metadata.paymentReference = payoutBatchId;
+             
                 await campaignRef.update({
                     receipts: FieldValue.arrayUnion(receipt)
                 });
+                receiptCreated = true;
+
+                // Track successful payment for potential rollback
+                processedPayments.push({
+                    payeeId: payment.payeeId,
+                    transactionId: transactionId,
+                    payoutBatchId: payoutBatchId,
+                    reconciliationId: reconciliationId
+                });
+
+                console.log(`✅ Payment successfully processed for ${payment.payeeId}`);
 
             } catch (error) {
                 hasErrors = true;
-                console.error(`Error processing payment for creator ${payment.payeeId}:`, error);
+                console.error(`❌ Error processing payment for creator ${payment.payeeId}:`, error);
+
+                // ROLLBACK LOGIC: Clean up partial state
+                try {
+                    if (transactionId) {
+                        console.log(`Rolling back transaction ${transactionId}...`);
+                        await db.collection('transactions').doc(transactionId).update({
+                            status: "failed",
+                            failureReason: error.message,
+                            failedAt: FieldValue.serverTimestamp()
+                        });
+                    }
+
+                    // Note: We CANNOT rollback PayPal payments automatically
+                    // This would need manual intervention or PayPal API calls to reverse
+                    if (payoutBatchId) {
+                        console.error(`⚠️  CRITICAL: PayPal payment ${payoutBatchId} succeeded but database updates failed. Manual reconciliation required.`);
+                        
+                        // Log this for manual review
+                        await db.collection('failed_payments').add({
+                            payeeId: payment.payeeId,
+                            payoutBatchId: payoutBatchId,
+                            error: error.message,
+                            needsManualReconciliation: true,
+                            createdAt: FieldValue.serverTimestamp(),
+                            transactionId: transactionId
+                        });
+                    }
+                } catch (rollbackError) {
+                    console.error(`Failed to rollback payment ${payment.payeeId}:`, rollbackError);
+                }
+
                 throw error; // Re-throw to be caught by outer try-catch
             }
         }
@@ -295,9 +372,196 @@ export async function payCreator(payments, campaign, { actorId, actorName }) {
             throw new Error('One or more payments failed to process');
         }
 
-        return { success: true };
+        return { 
+            success: true, 
+            processedPayments: processedPayments.length,
+            error: null
+        };
+
     } catch (error) {
         console.error('Error in payCreator:', error);
-        throw error;
+        
+        // Log the failure with all successful payments for audit
+        await db.collection('payment_batches').add({
+            status: 'failed',
+            error: error.message,
+            successfulPayments: processedPayments,
+            failedAt: FieldValue.serverTimestamp(),
+            campaignId: campaign.id,
+            processedBy: { id: actorId, name: actorName }
+        });
+        
+        return {
+            success: false,
+            error: error.message,
+            processedPayments: 0
+        };
     }
 }
+
+// export async function payCreator(payments, campaign, { actorId, actorName }) {
+//     try {
+//         let hasErrors = false;
+//         const pendingPayments = payments.pendingPayments;
+//         const campaignId = campaign.id;
+        
+//         // Process each user's payment
+//         for (const payment of pendingPayments) {
+//             try {
+//                 // Skip if no amount to pay
+//                 if (payment.amountOwed <= 0) {
+//                     console.log(`Skipping payment for ${payment.payeeId} - amount is 0`);
+//                     continue;
+//                 }
+
+//                 // Prepare PayPal payout
+//                 const payoutData = {
+//                     paymentEmail: payment.paymentEmail,
+//                     payoutAmount: payment.amountOwed.toFixed(2),
+//                     id: payment.payeeId
+//                 };
+
+//                 // Send PayPal payout
+//                 const payoutResult = await sendPayoutBatch([payoutData]);
+
+//                 // Verify PayPal response
+//                 if (!payoutResult || !payoutResult.batch_header || !payoutResult.batch_header.payout_batch_id) {
+//                     throw new Error('Invalid PayPal response');
+//                 }
+
+//                 let transactionEntry = {
+//                     targetUserId: payment.payeeId,
+//                     targetFirstName: payment.firstName,
+//                     targetLastName: payment.lastName,
+//                     campaignId: campaign.id,
+//                     amount: payment.amountOwed,
+//                     type: "creatorPayout",
+//                     source: "videoViews",
+//                     actorId: actorId,
+//                     actorName: actorName,
+//                     status: "completed",
+//                     currency: "USD",
+//                     paymentMethod: "paypal",
+//                     paymentReference: payoutResult.batch_header.payout_batch_id,
+//                     createdAt: FieldValue.serverTimestamp(),
+//                     isTestPayment: PAYPAL_API_BASE === "https://api.sandbox.paypal.com",
+//                     metadata: {
+//                         videoIds: payment.videos.map(v => v.id),
+//                         views: payment.videos.map(v => v.views),
+//                         ratePerMillion: campaign.ratePerMillion || 0,
+//                         payoutBatchId: payoutResult.batch_header.payout_batch_id,
+//                         timestamp: FieldValue.serverTimestamp(),
+//                         paymentEmail: payment.paymentEmail,
+//                         videoCount: payment.videos.length,
+//                         totalViews: payment.videos.reduce((sum, v) => sum + (v.views || 0), 0),
+//                         platformFee: 0,
+//                         netAmount: payment.amountOwed,
+//                         paymentStatus: "completed",
+//                         reconciliationId: `PAY-${Date.now()}-${payment.payeeId}`
+//                     }
+//                 };
+
+//                 await db.collection('transactions').add(transactionEntry);
+
+//                 // Mark videos as paid
+//                 const batch = db.batch();
+//                 for (const video of payment.videos) {
+//                     // Query to find the actual Firestore document by URL
+//                     const videoQuery = await db.collection('campaigns')
+//                         .doc(campaignId)
+//                         .collection('videos')
+//                         .where('url', '==', video.url)
+//                         .get();
+                    
+//                     if (videoQuery.empty) {
+//                         console.warn(`Video with URL ${video.url} not found in campaign ${campaignId}`);
+//                         continue;
+//                     }
+                    
+//                     if (videoQuery.docs.length > 1) {
+//                         console.error(`CRITICAL: Multiple videos found with same URL ${video.url} in campaign ${campaignId}`);
+//                         throw new Error(`Duplicate video URLs found - cannot safely process payment`);
+//                     }
+                    
+//                     // Get the actual Firestore document reference
+//                     const videoRef = videoQuery.docs[0].ref;
+                    
+//                     batch.update(videoRef, { 
+//                         hasBeenPaid: true,
+//                         payoutAmountForVideo: video.earnings,
+//                         paidBy: actorId,
+//                         paidByName: actorName,
+//                         paidAt: FieldValue.serverTimestamp()
+//                     });
+//                 }
+//                 await batch.commit();
+
+//                 // Create receipt
+//                 const receipt = {
+//                     receiptId: `REC-${Date.now()}-${payment.payeeId}`,
+//                     campaignId: campaignId,
+//                     creator: {
+//                         id: payment.payeeId,
+//                         firstName: payment.firstName,
+//                         lastName: payment.lastName,
+//                         email: payment.email,
+//                         paymentEmail: payment.paymentEmail
+//                     },
+//                     payment: {
+//                         amount: payment.amountOwed,
+//                         currency: "USD",
+//                         status: "completed",
+//                         method: "paypal",
+//                         batchId: payoutResult.batch_header.payout_batch_id,
+//                         timestamp: FieldValue.serverTimestamp()
+//                     },
+//                     videos: {
+//                         paid: payment.videos.map(video => ({
+//                             url: video.url,
+//                             title: video.title,
+//                             views: video.views,
+//                             earnings: video.earnings,
+//                             ratePerMillion: campaign.ratePerMillion
+//                         })),
+//                         unpaid: payments.unpaidVideos
+//                     },
+//                     summary: {
+//                         totalVideos: payment.videos.length,
+//                         totalViews: payment.videos.reduce((sum, v) => sum + (v.views || 0), 0),
+//                         platformFee: 0,
+//                         netAmount: payment.amountOwed,
+//                         unpaidVideosCount: payments.unpaidVideos.length
+//                     },
+//                     metadata: {
+//                         processedBy: {
+//                             id: actorId,
+//                             name: actorName
+//                         },
+//                         transactionId: transactionEntry.metadata.reconciliationId,
+//                         paymentReference: payoutResult.batch_header.payout_batch_id
+//                     }
+//                 };
+
+//                 // Add receipt to campaign document
+//                 const campaignRef = db.collection('campaigns').doc(campaignId);
+//                 await campaignRef.update({
+//                     receipts: FieldValue.arrayUnion(receipt)
+//                 });
+
+//             } catch (error) {
+//                 hasErrors = true;
+//                 console.error(`Error processing payment for creator ${payment.payeeId}:`, error);
+//                 throw error; // Re-throw to be caught by outer try-catch
+//             }
+//         }
+
+//         if (hasErrors) {
+//             throw new Error('One or more payments failed to process');
+//         }
+
+//         return { success: true };
+//     } catch (error) {
+//         console.error('Error in payCreator:', error);
+//         throw error;
+//     }
+// }

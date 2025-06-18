@@ -279,7 +279,7 @@ export async function updateCampaignMetrics(campaignIds = null) {
 
                 // Calculate total metrics by summing up all video metrics
                 const totalMetrics = updatedVideos.reduce((total, video) => ({
-                    views: total.views + (video.views || 0),
+                    views: total.views + (video.status === "approved" ? (video.views || 0) : 0),
                     shares: total.shares + (video.shares || 0),
                     comments: total.comments + (video.comments || 0),
                     likes: total.likes + (video.likes || 0)
