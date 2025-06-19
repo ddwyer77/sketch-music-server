@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { db, FieldValue } from './firebaseAdmin.js';
 import { updateCampaignMetrics, linkTikTokAccount, getUserById } from './helper.js';
-import { payCreator, calculatePendingCampaignPayments } from './payments.js';
+import { payCreator, calculatePendingCampaignPayments, recordDeposit } from './payments.js';
 import { updateActiveCampaigns } from './discordCampaignManager.js';
 import { 
     client, 
@@ -269,6 +269,56 @@ app.post('/pay-creators', async (req, res) => {
         res.status(500).json({ 
             success: false,
             error: 'Failed to process payments',
+            details: error.message 
+        });
+    }
+});
+
+// Record Deposit
+app.post('/record-deposit', async (req, res) => {
+    try {
+        const { actorId, campaignId, amount, paymentMethod = "stripe", paymentReference = null } = req.body;
+        
+        if (!actorId) {
+            return res.status(400).json({ error: 'actorId is required' });
+        }
+        
+        if (!campaignId) {
+            return res.status(400).json({ error: 'campaignId is required' });
+        }
+
+        if (!amount || amount <= 0) {
+            return res.status(400).json({ error: 'amount must be a positive number' });
+        }
+
+        // Fetch actor user data
+        const actorUser = await getUserById(actorId);
+        if (!actorUser) {
+            return res.status(404).json({ error: 'Actor user not found' });
+        }
+
+        const actorName = `${actorUser.firstName || ''} ${actorUser.lastName || ''}`.trim() || 'Unknown User';
+        
+        const result = await recordDeposit(actorId, actorName, campaignId, amount, paymentMethod, paymentReference);
+        
+        if (!result.success) {
+            return res.status(500).json({ 
+                success: false,
+                message: 'Failed to record deposit',
+                details: result.error || 'Unknown error'
+            });
+        }
+        
+        res.status(200).json({ 
+            success: true, 
+            message: 'Deposit recorded successfully',
+            transactionId: result.transactionId
+        });
+    } catch (error) {
+        console.error('Error recording deposit:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to record deposit',
             details: error.message 
         });
     }

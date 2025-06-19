@@ -399,4 +399,49 @@ export async function payCreator(payments, campaignId, { actorId, actorName }) {
     }
 }
 
+export async function recordDeposit(actorId, actorName, campaignId, depositAmount, paymentMethod = "stripe", paymentReference = null) {
+    try {
+        const reconciliationId = `DEP-${Date.now()}-${actorId}`;
+        const IS_SANDBOX = PAYPAL_API_BASE === "https://api.sandbox.paypal.com";
+
+        const transactionEntry = {
+            targetUserId: actorId,
+            campaignId: campaignId,
+            amount: depositAmount,
+            type: "campaignDeposit",
+            source: "manualDeposit",
+            actorId: actorId,
+            actorName: actorName,
+            status: "completed",
+            currency: "USD",
+            paymentMethod: paymentMethod,
+            paymentReference: paymentReference,
+            createdAt: FieldValue.serverTimestamp(),
+            isTestPayment: IS_SANDBOX,
+            metadata: {
+                depositSource: "dashboard",
+                platformFee: 0,
+                netAmount: depositAmount,
+                paymentStatus: "completed",
+                reconciliationId: reconciliationId
+            }
+        };
+
+        const transactionRef = await db.collection('transactions').add(transactionEntry);
+        
+        return {
+            success: true,
+            transactionId: transactionRef.id,
+            error: null
+        };
+
+    } catch (error) {
+        console.error('Error recording deposit:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
 
