@@ -277,7 +277,7 @@ app.post('/pay-creators', async (req, res) => {
 // Record Deposit
 app.post('/record-deposit', async (req, res) => {
     try {
-        const { actorId, campaignId, amount, paymentMethod = "stripe", paymentReference = null } = req.body;
+        const { actorId, campaignId, amount, paymentMethod = "paypal", paymentReference = null } = req.body;
         
         if (!actorId) {
             return res.status(400).json({ error: 'actorId is required' });
