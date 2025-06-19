@@ -568,5 +568,15 @@ export {
 };
 
 export const loginClient = () => {
-    client.login(process.env.DISCORD_BOT_TOKEN);
+    return new Promise((resolve, reject) => {
+        client.login(process.env.DISCORD_BOT_TOKEN)
+            .then(() => {
+                console.log('Discord bot logged in successfully');
+                resolve();
+            })
+            .catch((error) => {
+                console.error('Failed to login Discord bot:', error);
+                reject(error);
+            });
+    });
 };

@@ -38,7 +38,14 @@ app.use(express.json());
 
 // Health check endpoint
 app.get('/', (req, res) => {
-    res.status(200).send('Bot is running!');
+    // Basic health check - just check if the server is running
+    // Don't depend on Discord bot being ready
+    res.status(200).json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        discordBotReady: client.isReady(),
+        uptime: process.uptime()
+    });
 });
 
 app.get('/link-tiktok-account/:userId', async (req, res) => {
@@ -411,8 +418,15 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Start the server
+// Start the server first
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
-    loginClient();
+    
+    // Start Discord bot login asynchronously after server is running
+    setTimeout(() => {
+        loginClient().catch(error => {
+            console.error('Failed to login Discord bot:', error);
+            console.log('Server will continue running without Discord bot functionality');
+        });
+    }, 1000); // Wait 1 second before attempting Discord login
 });
