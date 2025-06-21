@@ -131,6 +131,15 @@ const handleSubmitCommand = async (interaction) => {
         // Get TikTok video data
         const videoData = await getTikTokVideoData(videoUrl);
 
+        // Check if video belongs to one of the verified accounts
+        const linkedUserAccounts = Object.keys(userData.tiktokData);
+        const submissionUsername = videoData.author.uniqueId;
+        if (!linkedUserAccounts.includes(submissionUsername)) {
+            return interaction.editReply({ 
+                content: 'Sorry, this social media account has not been linked or verified yet. Please use the /link discord command or visit the "discord" tab in your creator dashboard for more instructions.'
+            });
+        }
+
         // Check if required sound is included
         if (campaignData.requireSound && campaignData.soundId) {
             const hasRequiredSound = await videoContainsRequiredSound(videoUrl, campaignData);

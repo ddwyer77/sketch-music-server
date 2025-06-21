@@ -419,14 +419,6 @@ export async function linkTikTokAccount(tiktokUsername, linkToken) {
 
         const signature = data.userInfo.user.signature;
         
-        // Log the user's bio and token for debugging
-        console.log('Verification Check:', {
-            bio: signature,
-            token: linkToken,
-            userId: tokenData.userId,
-            bioContainsToken: signature.toLowerCase().includes(linkToken.toLowerCase())
-        });
-        
         // Check if the bio contains the token (case insensitive)
         if (!signature.toLowerCase().includes(linkToken.toLowerCase())) {
             return {
@@ -449,18 +441,40 @@ export async function linkTikTokAccount(tiktokUsername, linkToken) {
             };
         }
 
-        // Prepare TikTok data to store
-        const tiktokData = {
+        // Get existing user data to preserve current tiktokData accounts
+        const existingUserDoc = await db.collection('users').doc(userId).get();
+        const existingUserData = existingUserDoc.exists ? existingUserDoc.data() : {};
+        const currentTiktokData = existingUserData.tiktokData || {};
+
+        // Check if this TikTok account is already linked
+        const tiktokUniqueId = data.userInfo.user.uniqueId;
+        if (currentTiktokData[tiktokUniqueId]) {
+            return {
+                success: false,
+                message: 'This TikTok account is already linked to your account.'
+            };
+        }
+
+        // Prepare new TikTok account data
+        const newAccountData = {
             uniqueId: data.userInfo.user.uniqueId,
             profileImage: data.userInfo.user.avatarThumb,
             title: data.shareMeta.title,
-            description: data.shareMeta.desc
+            description: data.shareMeta.desc,
+            verifiedAt: Date.now(),
+            isVerified: true
+        };
+
+        // Add new account to existing tiktokData map
+        const updatedTiktokData = {
+            ...currentTiktokData,
+            [tiktokUniqueId]: newAccountData
         };
 
         // Update user document
         await db.collection('users').doc(userId).update({
             tiktokVerified: true,
-            tiktokData: tiktokData,
+            tiktokData: updatedTiktokData,
             updatedAt: Date.now()
         });
 
@@ -471,8 +485,9 @@ export async function linkTikTokAccount(tiktokUsername, linkToken) {
 
         return {
             success: true,
-            message: 'Success! Your account has been verified',
-            data: tiktokData
+            message: 'Success! Your TikTok account has been verified and added to your profile.',
+            data: newAccountData,
+            totalAccounts: Object.keys(updatedTiktokData).length
         };
 
     } catch (error) {
