@@ -59,10 +59,4 @@ async function migrateAllUsers() {
 }
 
 // node scripts/migrateTikTokDataStructure.js
-migrateTikTokDataStructure("WgEV1VtUgZMK4UoOjNr3uukL4Si2")
-    .catch(err => {
-        console.error('Error migrating TikTok data structure:', err);
-        process.exit(1);
-    });
-
-// migrateAllUsers();
+migrateAllUsers();

@@ -4,6 +4,7 @@ import { isUserAuthenticated, getFirebaseUserId, sanitizeDiscordId,sanitizeUrl,s
 import crypto from 'crypto';
 import { db, FieldValue } from './firebaseAdmin.js';
 import { TOKEN_EXPIRY, RATE_LIMIT_WINDOW, MAX_REQUESTS, RATE_LIMIT } from './constants.js';
+import axios from 'axios';
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
@@ -109,7 +110,24 @@ const handleSubmitCommand = async (interaction) => {
         }
 
         const campaignId = sanitizeCampaignId(interaction.options.getString('campaign_id'));
-        const videoUrl = sanitizeUrl(interaction.options.getString('video_url'));
+        let videoUrl = sanitizeUrl(interaction.options.getString('video_url'));
+
+        // Check for shortened/shareable urls and convert to full length
+        if (isShortenedTikTokUrl(videoUrl)) {
+            try {
+                const expandedUrl = await expandTikTokUrl(videoUrl);
+                videoUrl = expandedUrl;
+            } catch (error) {
+                const errorEmbed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Error')
+                    .setDescription('Shortened TikTok URLs can be unreliable. Please use the full video URL instead.');
+                
+                return interaction.editReply({
+                    embeds: [errorEmbed]
+                });
+            }
+        }
 
         const campaignRef = db.collection('campaigns').doc(campaignId);
         const campaign = await campaignRef.get();
@@ -253,6 +271,48 @@ const handleSubmitCommand = async (interaction) => {
         }
     }
 };
+
+export async function expandTikTokUrl(url) {
+    try {  
+      const response = await axios({
+        method: 'GET',
+        url: url,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Accept-Encoding': 'gzip, deflate',
+          'DNT': '1',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1'
+        },
+        maxRedirects: 5,
+        validateStatus: (status) => status >= 200 && status < 400,
+        timeout: 10000
+      });
+  
+      const expandedUrl = response.request.res.responseUrl;
+      return expandedUrl;
+  
+    } catch (error) {
+      console.error('Error expanding TikTok URL:', error);
+      throw new Error('Error processing video URL. Shortened TikTok URLs can be unreliable. Please use the full video URL instead.');
+    }
+}
+  
+function isShortenedTikTokUrl(url) {
+const lowerUrl = url.toLowerCase();
+const fullVideoPattern = /tiktok\.com\/@[^\/]+\/video\/\d+/;
+const shortenedPatterns = [
+    /tiktok\.com\/t\//,
+    /vm\.tiktok\.com/,
+    /vt\.tiktok\.com/,
+    /tiktok\.com\/v\//
+];
+
+return !fullVideoPattern.test(lowerUrl) && 
+        shortenedPatterns.some(pattern => pattern.test(lowerUrl));
+}
 
 const handleCampaignsCommand = async (interaction) => {
     const isAuthenticated = await isUserAuthenticated(interaction.user.id);
