@@ -507,13 +507,28 @@ export async function getUserById(userId) {
     try {
         const userDoc = await db.collection('users').doc(userId).get();
         if (!userDoc.exists) {
-            console.warn(`User not found with ID: ${userId}`);
             return null;
         }
         return { id: userDoc.id, ...userDoc.data() };
     } catch (error) {
-        console.error(`Error fetching user ${userId}:`, error);
+        console.error('Error getting user by ID:', error);
         return null;
+    }
+}
+
+export async function releaseCampaignPayments(campaignId) {
+    try {
+        const sanitizedCampaignId = sanitizeCampaignId(campaignId);
+        
+        // Update the campaign document to set paymentsReleased to true
+        await db.collection('campaigns').doc(sanitizedCampaignId).update({
+            paymentsReleased: true
+        });
+        
+        return { success: true, message: 'Campaign payments released successfully' };
+    } catch (error) {
+        console.error('Error releasing campaign payments:', error);
+        return { success: false, error: error.message };
     }
 }
 

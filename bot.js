@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { db, FieldValue } from './firebaseAdmin.js';
-import { updateCampaignMetrics, linkTikTokAccount, getUserById } from './helper.js';
+import { updateCampaignMetrics, linkTikTokAccount, getUserById, releaseCampaignPayments } from './helper.js';
 import { payCreator, calculatePendingCampaignPayments, recordDeposit } from './payments.js';
 import { updateActiveCampaigns } from './discordCampaignManager.js';
 import { 
@@ -270,6 +270,37 @@ app.post('/pay-creators', async (req, res) => {
             success: false,
             error: 'Failed to process payments',
             details: error.message 
+        });
+    }
+});
+
+app.post('/release-campaign-payments', async (req, res) => {
+    try {
+        const { userIds, campaignId, actorId } = req.body;
+        // CHECK IF PAYMENTSRELEASED IS TRUE AND IF SO RETURN
+        // ADD TO DATABASE paymentAmountTotalReleasedToCreators
+        if (!campaignId) {
+            return res.status(400).json({ error: 'campaignId is required' });
+        }
+
+        // Use the helper function to set paymentsReleased to true
+        const result = await releaseCampaignPayments(campaignId);
+        
+        if (!result.success) {
+            return res.status(500).json({
+                success: false,
+                error: result.error
+            });
+        }
+        
+        res.status(200).json({
+            success: true,
+            message: "Payments have successfully been released and added to creator's wallets."
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
         });
     }
 });
