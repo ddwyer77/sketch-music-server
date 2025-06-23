@@ -444,4 +444,6 @@ export async function recordDeposit(actorId, actorName, campaignId, depositAmoun
     }
 }
 
+export async function releaseCampaignPayments() {
 
+}

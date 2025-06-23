@@ -244,12 +244,8 @@ const handleSubmitCommand = async (interaction) => {
         
         if (error.message.includes('Invalid')) {
             errorMessage += error.message;
-        } else if (error.message.includes('Could not extract video ID')) {
-            if (error.message.includes('/photo/')) {
-                errorMessage = '❌ Error: You have submitted a TikTok photo instead of a video. Please submit a video URL instead.';
-            } else {
-                errorMessage = '❌ Error: Invalid TikTok URL. Please make sure you are submitting a valid TikTok video URL.';
-            }
+        } else if (error.message.includes('Could not extract video/photo ID')) {
+            errorMessage = '❌ Error: Invalid TikTok URL. Please make sure you are submitting a valid TikTok video or photo URL.';
         } else {
             errorMessage += 'Please try again.';
         }
@@ -301,17 +297,20 @@ export async function expandTikTokUrl(url) {
 }
   
 function isShortenedTikTokUrl(url) {
-const lowerUrl = url.toLowerCase();
-const fullVideoPattern = /tiktok\.com\/@[^\/]+\/video\/\d+/;
-const shortenedPatterns = [
-    /tiktok\.com\/t\//,
-    /vm\.tiktok\.com/,
-    /vt\.tiktok\.com/,
-    /tiktok\.com\/v\//
-];
+  const lowerUrl = url.toLowerCase();
+  const fullVideoPattern = /tiktok\.com\/@[^\/]+\/video\/\d+/;
+  const fullPhotoPattern = /tiktok\.com\/@[^\/]+\/photo\/\d+/;
+  const shortenedPatterns = [
+      /tiktok\.com\/t\//,
+      /vm\.tiktok\.com/,
+      /vt\.tiktok\.com/,
+      /tiktok\.com\/v\//
+  ];
 
-return !fullVideoPattern.test(lowerUrl) && 
-        shortenedPatterns.some(pattern => pattern.test(lowerUrl));
+  // A URL is shortened if it matches a shortened pattern AND is not a full video/photo pattern
+  return shortenedPatterns.some(pattern => pattern.test(lowerUrl)) && 
+         !fullVideoPattern.test(lowerUrl) && 
+         !fullPhotoPattern.test(lowerUrl);
 }
 
 const handleCampaignsCommand = async (interaction) => {

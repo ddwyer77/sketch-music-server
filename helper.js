@@ -116,18 +116,19 @@ export async function getTikTokVideoData(url) {
       }
     }
 
-    // Extract video ID from URL
-    const idMatch = url.match(/\/video\/(\d+)/);
-    if (!idMatch || !idMatch[1]) {
-      throw new Error('Could not extract video ID from URL: ' + url);
+    // Extract video/photo ID from URL - updated to handle both videos and photos
+    const idMatch = url.match(/\/(video|photo)\/(\d+)/);
+    if (!idMatch || !idMatch[2]) {
+      throw new Error('Could not extract video/photo ID from URL: ' + url);
     }
     
-    const videoId = idMatch[1];
+    const contentType = idMatch[1]; // 'video' or 'photo'
+    const contentId = idMatch[2];
     
     const response = await axios({
       method: 'GET',
       url: 'https://tiktok-api23.p.rapidapi.com/api/post/detail',
-      params: { videoId },
+      params: { videoId: contentId },
       headers: {
         'x-rapidapi-key': process.env.RAPID_API_KEY,
         'x-rapidapi-host': 'tiktok-api23.p.rapidapi.com'
@@ -143,7 +144,8 @@ export async function getTikTokVideoData(url) {
     const author = data?.itemInfo?.itemStruct?.author;
     
     return {
-      id: videoId,
+      id: contentId,
+      contentType: contentType, // Add this to distinguish between videos and photos
       title: data?.shareMeta?.title || '',
       author: author ? {
         nickname: author.nickname,
@@ -273,7 +275,7 @@ export async function updateCampaignMetrics(campaignIds = null) {
                     musicTitle: metricsArray[index].musicTitle || '',
                     musicAuthor: metricsArray[index].musicAuthor || '',
                     musicId: metricsArray[index].musicId || '',
-                    author: metricsArray[index].author,
+                    author: metricsArray[index].author || null,
                     earnings: calculateEarnings(campaign, metricsArray[index].views || 0)
                 }));
 
