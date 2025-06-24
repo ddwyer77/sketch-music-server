@@ -138,6 +138,7 @@ app.post('/api/update-metrics', async (req, res) => {
         // Handle case where req.body is undefined
         const campaignIds = req.body?.campaignIds;
         const result = await updateCampaignMetrics(campaignIds || null);
+        console.log("Campaign Metrics Successfully Updated on ", new Date().toLocaleString())
         res.status(200).json(result);
     } catch (error) {
         console.error('Error updating campaign metrics:', error);
@@ -352,9 +353,11 @@ app.post('/record-deposit', async (req, res) => {
     }
 });
 
-// Schedule metrics update every hour
-cron.schedule('0 * * * *', async () => {
+// Schedule metrics update every 15 mins
+cron.schedule('*/15 * * * *', async () => {
     console.log('Running scheduled campaign metrics update...');
+    const startTime = new Date();
+    
     try {
         // Update all campaign metrics
         await updateCampaignMetrics();
@@ -367,8 +370,28 @@ cron.schedule('0 * * * *', async () => {
         } else {
             console.log('Discord client not ready, skipping channel updates');
         }
+
+        // Update the last successful run info (Firestore syntax)
+        await db.collection('system_info').doc('crons').set({
+            updateMetrics: {
+                lastUpdated: new Date(),
+                status: 'success',
+                duration: Date.now() - startTime.getTime()
+            }
+        }, { merge: true });
+
     } catch (error) {
         console.error('Scheduled update failed:', error);
+        
+        // Update with failure info (Firestore syntax)
+        await db.collection('system_info').doc('crons').set({
+            updateMetrics: {
+                lastUpdated: new Date(),
+                status: 'failed',
+                error: error.message,
+                duration: Date.now() - startTime.getTime()
+            }
+        }, { merge: true });
     }
 });
 
