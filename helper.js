@@ -95,8 +95,8 @@ export async function getFirebaseUserId(discordId) {
 
 export async function getTikTokVideoData(url) {
   try {
-    // Check if it's a shortened URL
-    if (url.includes('/t/')) {
+    // Check if it's a shortened URL - updated to handle both /t/ and vt.tiktok.com formats
+    if (url.includes('/t/') || url.includes('vt.tiktok.com')) {
       try {
         // Follow the redirect to get the full URL
         const response = await axios({
@@ -516,19 +516,19 @@ export async function getUserById(userId) {
     }
 }
 
-export async function releaseCampaignPayments(campaignId) {
+// Helper function to check if user has admin role
+export async function isUserAdmin(userId) {
     try {
-        const sanitizedCampaignId = sanitizeCampaignId(campaignId);
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (!userDoc.exists) {
+            return false;
+        }
         
-        // Update the campaign document to set paymentsReleased to true
-        await db.collection('campaigns').doc(sanitizedCampaignId).update({
-            paymentsReleased: true
-        });
-        
-        return { success: true, message: 'Campaign payments released successfully' };
+        const userData = userDoc.data();
+        return userData.roles && userData.roles.includes('admin');
     } catch (error) {
-        console.error('Error releasing campaign payments:', error);
-        return { success: false, error: error.message };
+        console.error('Error checking admin status:', error);
+        return false;
     }
 }
 

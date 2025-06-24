@@ -1,4 +1,4 @@
-import { calculateEarnings, updateCampaignMetrics } from './helper.js';
+import { isUserAdmin, sanitizeCampaignId } from './helper.js';
 import { db, FieldValue } from './firebaseAdmin.js';
 import axios from 'axios';
 
@@ -54,83 +54,6 @@ async function sendPayoutBatch(recipients) {
     });
 
     return response.data;
-}
-
-export async function calculatePendingCampaignPayments(campaign, usersToBePaid) {
-    try {
-        // Metrics for campaign is updated before submitting request on front end
-        let userPayoutData = {};
-        const videos = campaign.videos || [];
-        let unpaidVideos = [];
-
-        for (const video of videos) {
-            const earningsForThisVideo = video.earnings;
-            const authorId = video.author_id;
-            if (!usersToBePaid.includes(authorId)) {
-                continue;
-            }
-
-            // Check for conditions that would prevent payment
-            if (video.status !== "approved") {
-                unpaidVideos.push({
-                    payeeId: authorId,
-                    reasonNoPaymentSent: "Status was not 'approved'",
-                    video
-                });
-            } else if (video.hasBeenPaid === true) {
-                unpaidVideos.push({
-                    payeeId: authorId,
-                    reasonNoPaymentSent: "Video has already been marked as paid",
-                    video
-                });
-            } else if (video.earnings <= 0) {
-                unpaidVideos.push({
-                    payeeId: authorId,
-                    reasonNoPaymentSent: "The video has earned $0.00",
-                    video
-                });
-            } else {
-                // Only process payment for videos that pass all checks
-                if (userPayoutData[authorId]) {
-                    userPayoutData[authorId].amountOwed += earningsForThisVideo;
-                    userPayoutData[authorId].videos.push(video);
-                } else {
-                    userPayoutData[authorId] = {
-                        payeeId: authorId,
-                        amountOwed: earningsForThisVideo,
-                        videos: [video]
-                    };
-                }
-            }
-        }
-
-        // Add user doc data to each payout entry
-        const userIds = Object.keys(userPayoutData);
-        const userSnapshots = await Promise.all(
-            userIds.map(id => db.collection('users').doc(id).get())
-        );
-
-        userSnapshots.forEach(snapshot => {
-            if (snapshot.exists) {
-                const userData = snapshot.data();
-                const userId = snapshot.id;
-                userPayoutData[userId] = {
-                    ...userPayoutData[userId],
-                    ...userData
-                };
-            }
-        });
-        
-        const userPayoutArray = Object.values(userPayoutData);
-        return {
-            pendingPayments: userPayoutArray,
-            unpaidVideos: unpaidVideos
-        };
-
-    } catch (error) {
-        console.error('Error calculating pending campaign payments:', error);
-        throw new Error('Failed to calculate pending payments: ' + error.message);
-    }
 }
 
 export async function payCreator(payments, campaignId, { actorId, actorName }) {
@@ -444,6 +367,155 @@ export async function recordDeposit(actorId, actorName, campaignId, depositAmoun
     }
 }
 
-export async function releaseCampaignPayments() {
+export async function releaseCampaignPayments(campaignId, actorId) {
+    try {
+        // Check if actorId is provided
+        if (!actorId) {
+            return { success: false, message: 'Actor ID is required for authorization.' };
+        }
 
+        // Check if actor is an admin
+        const isAdmin = await isUserAdmin(actorId);
+        if (!isAdmin) {
+            return { success: false, message: 'Unauthorized. Only admins can release campaign payments.' };
+        }
+
+        const sanitizedCampaignId = sanitizeCampaignId(campaignId);
+        const campaignDocRef = db.collection('campaigns').doc(sanitizedCampaignId);
+        const campaignDoc = await campaignDocRef.get();
+
+        if (!campaignDoc.exists) {
+            return { success: false, message: 'Campaign not found.' };
+        }
+
+        const campaignData = campaignDoc.data();
+        
+        if (campaignData.paymentsReleased) {
+            return { success: false, message: 'Payments have already been released for this campaign.' };
+        }
+
+        const usersToBePaid = () => {
+            const creators = new Set(); // Use Set to avoid duplicates
+            const videos = campaignData.videos || [];
+            
+            videos.forEach(video => {
+                if (video.author_id) {
+                    creators.add(video.author_id);
+                }
+            });
+            
+            return Array.from(creators); // Convert Set back to array
+        }
+
+        const paymentsSentToWallets = await sendPaymentsToWallets(campaignData, usersToBePaid());
+        
+        await campaignDocRef.update({
+            paymentsReleased: true,
+            paymentsReleasedBy: actorId,
+            paymentsReleasedAt: Date.now(),
+            paymentReleaseReceipt: paymentsSentToWallets
+        });
+        
+        return { 
+            success: true, 
+            message: 'Campaign payments released successfully'
+        };
+    } catch (error) {
+        console.error('Error releasing campaign payments:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+async function sendPaymentsToWallets(campaign, usersToBePaid) {
+    try {
+        let userPayoutData = {};
+        const videos = campaign.videos || [];
+        let unpaidVideos = [];
+
+        for (const video of videos) {
+            const earningsForThisVideo = video.earnings;
+            const authorId = video.author_id;
+            if (!usersToBePaid.includes(authorId)) {
+                continue;
+            }
+
+            // Check for conditions that would prevent payment
+            if (video.status !== "approved") {
+                unpaidVideos.push({
+                    payeeId: authorId,
+                    reasonNoPaymentSent: "Status was not 'approved'",
+                    video
+                });
+            } else if (video.earnings <= 0) {
+                unpaidVideos.push({
+                    payeeId: authorId,
+                    reasonNoPaymentSent: "The video has earned $0.00",
+                    video
+                });
+            } else {
+                // Only process payment for videos that pass all checks
+                if (userPayoutData[authorId]) {
+                    userPayoutData[authorId].amountOwed += earningsForThisVideo;
+                    userPayoutData[authorId].videos.push(video);
+                } else {
+                    userPayoutData[authorId] = {
+                        payeeId: authorId,
+                        amountOwed: earningsForThisVideo,
+                        videos: [video]
+                    };
+                }
+            }
+        }
+
+        // Add user doc data to each payout entry and prepare wallet updates
+        const userIds = Object.keys(userPayoutData);
+        const userSnapshots = await Promise.all(
+            userIds.map(id => db.collection('users').doc(id).get())
+        );
+
+        // Prepare batch operations for wallet updates
+        const batch = db.batch();
+        const walletUpdateResults = [];
+
+        userSnapshots.forEach(snapshot => {
+            if (snapshot.exists) {
+                const userData = snapshot.data();
+                const userId = snapshot.id;
+                const payoutData = userPayoutData[userId];
+                
+                // Merge user data with payout data
+                userPayoutData[userId] = {
+                    ...payoutData,
+                    ...userData
+                };
+
+                // Prepare wallet update
+                const userRef = db.collection('users').doc(userId);
+                const currentWallet = userData.wallet || 0;
+                const newWalletAmount = currentWallet + payoutData.amountOwed;
+                
+                batch.update(userRef, {
+                    wallet: newWalletAmount
+                });
+
+                walletUpdateResults.push({
+                    userId: userId,
+                    previousWallet: currentWallet,
+                    payoutAmount: payoutData.amountOwed,
+                    newWallet: newWalletAmount,
+                    userData: userData
+                });
+            }
+        });
+  
+        await batch.commit();
+        return {
+            unpaidVideos: unpaidVideos,
+            walletUpdates: walletUpdateResults
+        };
+
+    } catch (error) {
+        console.error('Error calculating pending campaign payments:', error);
+        throw new Error('Failed to calculate pending payments: ' + error.message);
+    }
 }

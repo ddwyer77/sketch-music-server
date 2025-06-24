@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { db, FieldValue } from './firebaseAdmin.js';
-import { updateCampaignMetrics, linkTikTokAccount, getUserById, releaseCampaignPayments } from './helper.js';
-import { payCreator, calculatePendingCampaignPayments, recordDeposit } from './payments.js';
+import { updateCampaignMetrics, linkTikTokAccount, getUserById } from './helper.js';
+import { payCreator, recordDeposit, releaseCampaignPayments } from './payments.js';
 import { updateActiveCampaigns } from './discordCampaignManager.js';
 import { 
     client, 
@@ -205,86 +205,86 @@ app.post('/api/generate-social-media-account-link-token', async (req, res) => {
 });
 
 // Pay Creators 
-app.post('/pay-creators', async (req, res) => {
-    try {
-        const { userIds, campaignId, actorId } = req.body;
+// app.post('/pay-creators', async (req, res) => {
+//     try {
+//         const { userIds, campaignId, actorId } = req.body;
         
-        if (!userIds || !Array.isArray(userIds)) {
-            return res.status(400).json({ error: 'userIds must be an array' });
-        }
+//         if (!userIds || !Array.isArray(userIds)) {
+//             return res.status(400).json({ error: 'userIds must be an array' });
+//         }
         
-        if (!campaignId) {
-            return res.status(400).json({ error: 'campaignId is required' });
-        }
+//         if (!campaignId) {
+//             return res.status(400).json({ error: 'campaignId is required' });
+//         }
 
-        if (!actorId) {
-            return res.status(400).json({ error: 'actorId is required' });
-        }
+//         if (!actorId) {
+//             return res.status(400).json({ error: 'actorId is required' });
+//         }
 
-        // Fetch actor user data
-        const actorUser = await getUserById(actorId);
-        if (!actorUser) {
-            return res.status(404).json({ error: 'Actor user not found' });
-        }
+//         // Fetch actor user data
+//         const actorUser = await getUserById(actorId);
+//         if (!actorUser) {
+//             return res.status(404).json({ error: 'Actor user not found' });
+//         }
 
-        // Fetch users from DB
-        const users = await Promise.all(userIds.map(getUserById));
-        const validUsers = users.filter(u => u && u.paymentEmail);
+//         // Fetch users from DB
+//         const users = await Promise.all(userIds.map(getUserById));
+//         const validUsers = users.filter(u => u && u.paymentEmail);
 
-        if (validUsers.length === 0) {
-            return res.status(400).json({ error: 'One or more users has not added an email address for payment.' });
-        }
+//         if (validUsers.length === 0) {
+//             return res.status(400).json({ error: 'One or more users has not added an email address for payment.' });
+//         }
 
-        const campaignDoc = await db.collection('campaigns').doc(campaignId).get();
-        if (!campaignDoc.exists) {
-            return res.status(404).json({ error: 'Campaign not found' });
-        }
+//         const campaignDoc = await db.collection('campaigns').doc(campaignId).get();
+//         if (!campaignDoc.exists) {
+//             return res.status(404).json({ error: 'Campaign not found' });
+//         }
 
-        const campaign = campaignDoc.data();
-        if (!campaign.videos || campaign.videos.length === 0) {
-            return res.status(400).json({ error: 'There are no videos submitted for this campaign' });
-        }
+//         const campaign = campaignDoc.data();
+//         if (!campaign.videos || campaign.videos.length === 0) {
+//             return res.status(400).json({ error: 'There are no videos submitted for this campaign' });
+//         }
         
-        const payments = await calculatePendingCampaignPayments(campaign, userIds);
-        const result = await payCreator(payments, campaignDoc.id, {
-            actorId,
-            actorName: `${actorUser.firstName || ''} ${actorUser.lastName || ''}`.trim() || 'Unknown User'
-        });
+//         const payments = await calculatePendingCampaignPayments(campaign, userIds);
+//         const result = await payCreator(payments, campaignDoc.id, {
+//             actorId,
+//             actorName: `${actorUser.firstName || ''} ${actorUser.lastName || ''}`.trim() || 'Unknown User'
+//         });
         
-        if (!result.success) {
-            return res.status(500).json({ 
-                success: false,
-                message: 'Failed to process payments',
-                details: result.error || 'Unknown error'
-            });
-        }
+//         if (!result.success) {
+//             return res.status(500).json({ 
+//                 success: false,
+//                 message: 'Failed to process payments',
+//                 details: result.error || 'Unknown error'
+//             });
+//         }
         
-        res.status(200).json({ 
-            success: true, 
-            message: 'All payments processed successfully',
-            processedPayments: result.processedPayments
-        });
-    } catch (error) {
-        console.error('Error processing payments:', error);
-        res.status(500).json({ 
-            success: false,
-            error: 'Failed to process payments',
-            details: error.message 
-        });
-    }
-});
+//         res.status(200).json({ 
+//             success: true, 
+//             message: 'All payments processed successfully',
+//             processedPayments: result.processedPayments
+//         });
+//     } catch (error) {
+//         console.error('Error processing payments:', error);
+//         res.status(500).json({ 
+//             success: false,
+//             error: 'Failed to process payments',
+//             details: error.message 
+//         });
+//     }
+// });
 
 app.post('/release-campaign-payments', async (req, res) => {
     try {
-        const { userIds, campaignId, actorId } = req.body;
-        // CHECK IF PAYMENTSRELEASED IS TRUE AND IF SO RETURN
+        const { campaignId, actorId } = req.body;
+   
         // ADD TO DATABASE paymentAmountTotalReleasedToCreators
         if (!campaignId) {
             return res.status(400).json({ error: 'campaignId is required' });
         }
 
         // Use the helper function to set paymentsReleased to true
-        const result = await releaseCampaignPayments(campaignId);
+        const result = await releaseCampaignPayments(campaignId, actorId);
         
         if (!result.success) {
             return res.status(500).json({
@@ -293,10 +293,7 @@ app.post('/release-campaign-payments', async (req, res) => {
             });
         }
         
-        res.status(200).json({
-            success: true,
-            message: "Payments have successfully been released and added to creator's wallets."
-        });
+        res.status(200).json(result);
     } catch (error) {
         res.status(500).json({
             success: false,
