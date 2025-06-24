@@ -433,8 +433,10 @@ async function sendPaymentsToWallets(campaign, usersToBePaid) {
         let unpaidVideos = [];
 
         for (const video of videos) {
-            const earningsForThisVideo = video.earnings;
+            // Safely handle earnings - default to 0 if undefined/null/NaN
+            const earningsForThisVideo = parseFloat(video.earnings) || 0;
             const authorId = video.author_id;
+            
             if (!usersToBePaid.includes(authorId)) {
                 continue;
             }
@@ -446,7 +448,7 @@ async function sendPaymentsToWallets(campaign, usersToBePaid) {
                     reasonNoPaymentSent: "Status was not 'approved'",
                     video
                 });
-            } else if (video.earnings <= 0) {
+            } else if (earningsForThisVideo <= 0) {
                 unpaidVideos.push({
                     payeeId: authorId,
                     reasonNoPaymentSent: "The video has earned $0.00",
@@ -491,8 +493,9 @@ async function sendPaymentsToWallets(campaign, usersToBePaid) {
 
                 // Prepare wallet update
                 const userRef = db.collection('users').doc(userId);
-                const currentWallet = userData.wallet || 0;
-                const newWalletAmount = currentWallet + payoutData.amountOwed;
+                const currentWallet = parseFloat(userData.wallet) || 0;
+                const payoutAmount = parseFloat(payoutData.amountOwed) || 0;
+                const newWalletAmount = currentWallet + payoutAmount;
                 
                 batch.update(userRef, {
                     wallet: newWalletAmount
@@ -501,7 +504,7 @@ async function sendPaymentsToWallets(campaign, usersToBePaid) {
                 walletUpdateResults.push({
                     userId: userId,
                     previousWallet: currentWallet,
-                    payoutAmount: payoutData.amountOwed,
+                    payoutAmount: payoutAmount,
                     newWallet: newWalletAmount,
                     userData: userData
                 });
