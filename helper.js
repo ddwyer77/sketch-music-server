@@ -1,4 +1,4 @@
-import { db } from './firebaseAdmin.js';
+import { db, auth } from './firebaseAdmin.js';
 import axios from 'axios';
 
 // Input validation and sanitization
@@ -27,6 +27,18 @@ function sanitizeTikTokId(id) {
 
   return safe;
 }
+
+function sanitizeUserId(userId) {
+    if (!userId || typeof userId !== 'string') {
+        throw new Error('Invalid user ID');
+    }
+    // Firebase Auth user IDs are 28 characters long and can contain letters, numbers, and some special characters
+    if (!/^[a-zA-Z0-9_-]{1,28}$/.test(userId)) {
+        throw new Error('Invalid user ID format');
+    }
+    return userId;
+}
+
 
 function sanitizeToken(token) {
     // Tokens should be hex strings of length 64 (32 bytes)
@@ -183,11 +195,6 @@ export async function videoContainsRequiredSound(videoUrl, campaign) {
 
 // Check if a campaign meets completion criteria
 export function checkCampaignCompletionCriteria(campaign) {
-    // TODO: Implement end date check when campaign end dates are added
-    // if (campaign.endDate && new Date(campaign.endDate) < new Date()) {
-    //     return true;
-    // }
-
     // Check if budget has been reached
     if (campaign.budget && campaign.budgetUsed >= campaign.budget) {
         return true;
@@ -532,11 +539,59 @@ export async function isUserAdmin(userId) {
     }
 }
 
+// Firebase authentication middleware
+export async function authenticateUser(req, res, next) {
+    try {
+        const authHeader = req.headers.authorization;
+        
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'No valid authorization header found' });
+        }
+
+        const token = authHeader.split('Bearer ')[1];
+        
+        if (!token) {
+            return res.status(401).json({ error: 'No token provided' });
+        }
+
+        // Verify the Firebase ID token
+        const decodedToken = await auth.verifyIdToken(token);
+        
+        // Add the user info to the request object
+        req.user = {
+            uid: decodedToken.uid,
+            email: decodedToken.email,
+            emailVerified: decodedToken.email_verified
+        };
+
+        next();
+    } catch (error) {
+        console.error('Authentication error:', error);
+        return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+}
+
+// Helper function to verify user can access their own data
+export function verifyUserAccess(req, res, next) {
+    const requestedUserId = req.body.userId || req.params.userId;
+    
+    if (!requestedUserId) {
+        return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    if (requestedUserId !== req.user.uid) {
+        return res.status(403).json({ error: 'Unauthorized. You can only access your own data.' });
+    }
+
+    next();
+}
+
 // Export sanitization functions for use in other files
 export {
     sanitizeDiscordId,
     sanitizeToken,
     sanitizeUrl,
     sanitizeCampaignId,
-    sanitizeTikTokId
+    sanitizeTikTokId,
+    sanitizeUserId
 }; 

@@ -1,6 +1,6 @@
 import 'dotenv/config';
-import { db, FieldValue } from './firebaseAdmin.js';
-import { updateCampaignMetrics, linkTikTokAccount, getUserById } from './helper.js';
+import { db } from './firebaseAdmin.js';
+import { updateCampaignMetrics, linkTikTokAccount, getUserById, authenticateUser, verifyUserAccess } from './helper.js';
 import { payCreator, recordDeposit, releaseCampaignPayments } from './payments.js';
 import { updateActiveCampaigns } from './discordCampaignManager.js';
 import { 
@@ -138,7 +138,7 @@ app.post('/api/update-metrics', async (req, res) => {
         // Handle case where req.body is undefined
         const campaignIds = req.body?.campaignIds;
         const result = await updateCampaignMetrics(campaignIds || null);
-        console.log("Campaign Metrics Successfully Updated on ", new Date().toLocaleString())
+        console.log("Campaign Metrics Successfully Updated")
         res.status(200).json(result);
     } catch (error) {
         console.error('Error updating campaign metrics:', error);
@@ -206,74 +206,44 @@ app.post('/api/generate-social-media-account-link-token', async (req, res) => {
 });
 
 // Pay Creators 
-// app.post('/pay-creators', async (req, res) => {
-//     try {
-//         const { userIds, campaignId, actorId } = req.body;
+app.post('/pay-creator', authenticateUser, verifyUserAccess, async (req, res) => {
+    try {
+        const { userId } = req.body;
         
-//         if (!userIds || !Array.isArray(userIds)) {
-//             return res.status(400).json({ error: 'userIds must be an array' });
-//         }
-        
-//         if (!campaignId) {
-//             return res.status(400).json({ error: 'campaignId is required' });
-//         }
+        if (!userId) {
+            return res.status(400).json({ error: 'Request missing user ID.' });
+        }
 
-//         if (!actorId) {
-//             return res.status(400).json({ error: 'actorId is required' });
-//         }
+        // Call the simplified payCreator function
+        const result = await payCreator(userId, {
+            actorId: 'sketchMusic',
+            actorName: 'Sketch Music'
+        });
 
-//         // Fetch actor user data
-//         const actorUser = await getUserById(actorId);
-//         if (!actorUser) {
-//             return res.status(404).json({ error: 'Actor user not found' });
-//         }
+        if (!result.success) {
+            return res.status(400).json({
+                success: false,
+                error: result.error
+            });
+        }
 
-//         // Fetch users from DB
-//         const users = await Promise.all(userIds.map(getUserById));
-//         const validUsers = users.filter(u => u && u.paymentEmail);
-
-//         if (validUsers.length === 0) {
-//             return res.status(400).json({ error: 'One or more users has not added an email address for payment.' });
-//         }
-
-//         const campaignDoc = await db.collection('campaigns').doc(campaignId).get();
-//         if (!campaignDoc.exists) {
-//             return res.status(404).json({ error: 'Campaign not found' });
-//         }
-
-//         const campaign = campaignDoc.data();
-//         if (!campaign.videos || campaign.videos.length === 0) {
-//             return res.status(400).json({ error: 'There are no videos submitted for this campaign' });
-//         }
-        
-//         const payments = await calculatePendingCampaignPayments(campaign, userIds);
-//         const result = await payCreator(payments, campaignDoc.id, {
-//             actorId,
-//             actorName: `${actorUser.firstName || ''} ${actorUser.lastName || ''}`.trim() || 'Unknown User'
-//         });
-        
-//         if (!result.success) {
-//             return res.status(500).json({ 
-//                 success: false,
-//                 message: 'Failed to process payments',
-//                 details: result.error || 'Unknown error'
-//             });
-//         }
-        
-//         res.status(200).json({ 
-//             success: true, 
-//             message: 'All payments processed successfully',
-//             processedPayments: result.processedPayments
-//         });
-//     } catch (error) {
-//         console.error('Error processing payments:', error);
-//         res.status(500).json({ 
-//             success: false,
-//             error: 'Failed to process payments',
-//             details: error.message 
-//         });
-//     }
-// });
+        res.status(200).json({ 
+            success: true, 
+            message: 'Payment processed successfully',
+            transactionId: result.transactionId,
+            payoutBatchId: result.payoutBatchId,
+            amount: result.amount,
+            paymentEmail: result.paymentEmail
+        });
+    } catch (error) {
+        console.error('Error processing payment:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to process payment',
+            message: error.message 
+        });
+    }
+});
 
 app.post('/release-campaign-payments', async (req, res) => {
     try {
@@ -379,6 +349,8 @@ cron.schedule('*/15 * * * *', async () => {
                 duration: Date.now() - startTime.getTime()
             }
         }, { merge: true });
+
+        console.log("Scheduled campaign metrics updated successfully on ", new Date().toLocaleString())
 
     } catch (error) {
         console.error('Scheduled update failed:', error);
