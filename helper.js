@@ -105,6 +105,9 @@ export async function getFirebaseUserId(discordId) {
     }
 }
 
+// Add delays between API calls
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 export async function getTikTokVideoData(url) {
   try {
     // Check if it's a shortened URL - updated to handle both /t/ and vt.tiktok.com formats
@@ -155,6 +158,8 @@ export async function getTikTokVideoData(url) {
     const music = data?.itemInfo?.itemStruct?.music;
     const author = data?.itemInfo?.itemStruct?.author;
     
+    await delay(100); // Wait 1 second between calls
+
     return {
       id: contentId,
       contentType: contentType, // Add this to distinguish between videos and photos
