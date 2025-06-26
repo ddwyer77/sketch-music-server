@@ -368,7 +368,13 @@ export function calculateEarnings(campaign, views) {
 
     // Calculate earnings: (rate per million / 1,000,000) * views
     // Round to 2 decimal places to avoid floating point precision issues
-    return Number(((rate / 1000000) * views).toFixed(2));
+    const amount = Number(((rate / 1000000) * views).toFixed(2));
+    
+    if (campaign.maxCreatorEarningsPerPost && amount > campaign.maxCreatorEarningsPerPost) {
+        return campaign.maxCreatorEarningsPerPost;
+    }
+
+    return amount;
 }
 
 export async function linkTikTokAccount(tiktokUsername, linkToken) {
