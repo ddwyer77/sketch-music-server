@@ -446,15 +446,17 @@ const handleStatusCommand = async (interaction) => {
         const isAuthenticated = await isUserAuthenticated(interaction.user.id);
         let email = null;
         let tiktokVerified = false;
+        let linkedTikTokAccounts = [];
         const firebaseUserId = await getFirebaseUserId(interaction.user.id);
         if (firebaseUserId) {
             const userDoc = await db.collection('users').doc(firebaseUserId).get();
             if (userDoc.exists) {
                 email = userDoc.data().email || null;
                 tiktokVerified = userDoc.data().tiktokVerified || false;
+                linkedTikTokAccounts = Object.keys(userDoc.data().tiktokData || {}).join(', ');
             }
         }
-        let content = `**Username:** \`${interaction.user.username}\`\n**Logged In:** \`${isAuthenticated}\`\n**Server ID:** \`${interaction.guildId}\`\n**TikTok Account Verified:** \`${tiktokVerified}\``;
+        let content = `**Username:** \`${interaction.user.username}\`\n**Logged In:** \`${isAuthenticated}\`\n**Server ID:** \`${interaction.guildId}\`\n**TikTok Account Verified:** \`${tiktokVerified}\`\n**Linked Social Media Accounts:** \`${linkedTikTokAccounts || 'None'}\``;
         if (email) {
             content += `\n**Email:** \`${email}\``;
         }

@@ -323,8 +323,9 @@ app.post('/record-deposit', async (req, res) => {
     }
 });
 
-// Schedule metrics update every 15 mins
-cron.schedule('*/15 * * * *', async () => {
+// Schedule metrics update every 15 mins on production and hour on dev
+const cronSchedule = process.env.ENVIRONMENT === 'development' ? '0 * * * *' : '*/15 * * * *';
+cron.schedule(cronSchedule, async () => {
     console.log('Running scheduled campaign metrics update...');
     const startTime = new Date();
     

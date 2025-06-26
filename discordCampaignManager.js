@@ -60,6 +60,11 @@ export async function updateActiveCampaigns(discordClient) {
                         .setColor(0x0099ff)
                         .addFields(
                             {
+                                name: 'Type',
+                                value: campaign.type || 'N/A',
+                                inline: false
+                            },
+                            {
                                 name: 'Notes',
                                 value: campaign.notes || 'N/A',
                                 inline: false
