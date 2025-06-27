@@ -1,6 +1,6 @@
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, MessageFlags, EmbedBuilder } from 'discord.js';
 import 'dotenv/config';
-import { isUserAuthenticated, getFirebaseUserId, sanitizeDiscordId,sanitizeUrl,sanitizeCampaignId,videoContainsRequiredSound,getTikTokVideoData,linkTikTokAccount } from './helper.js';
+import { isDiscordUserAuthenticated, getFirebaseUserId, sanitizeDiscordId,sanitizeUrl,sanitizeCampaignId,videoContainsRequiredSound,getTikTokVideoData,linkTikTokAccount } from './helper.js';
 import crypto from 'crypto';
 import { db, FieldValue } from './firebaseAdmin.js';
 import { TOKEN_EXPIRY, RATE_LIMIT_WINDOW, MAX_REQUESTS, RATE_LIMIT } from './constants.js';
@@ -80,10 +80,10 @@ const handleSubmitCommand = async (interaction) => {
         await interaction.deferReply({ ephemeral: true });
 
         // Check if user is authenticated
-        const isAuthenticated = await isUserAuthenticated(interaction.user.id);
+        const isAuthenticated = await isDiscordUserAuthenticated(interaction.user.id);
         if (!isAuthenticated) {
             return interaction.editReply({ 
-                content: 'You need to authenticate first. Use the /login command.'
+                content: 'You need to log in first. Use the /login command.'
             });
         }
 
@@ -314,7 +314,7 @@ function isShortenedTikTokUrl(url) {
 }
 
 const handleCampaignsCommand = async (interaction) => {
-    const isAuthenticated = await isUserAuthenticated(interaction.user.id);
+    const isAuthenticated = await isDiscordUserAuthenticated(interaction.user.id);
     if (!isAuthenticated) {
         return interaction.reply({
             content: 'Please log in to view campaigns with the /login command.',
@@ -410,7 +410,7 @@ const handleLoginCommand = async (interaction) => {
 
 const handleLogoutCommand = async (interaction) => {
     try {
-        const isAuthenticated = await isUserAuthenticated(interaction.user.id);
+        const isAuthenticated = await isDiscordUserAuthenticated(interaction.user.id);
         if (!isAuthenticated) {
             return interaction.reply({
                 content: 'It looks like you are already logged out. Log in with /login.',
@@ -443,7 +443,7 @@ const handleLogoutCommand = async (interaction) => {
 
 const handleStatusCommand = async (interaction) => {
     try {
-        const isAuthenticated = await isUserAuthenticated(interaction.user.id);
+        const isAuthenticated = await isDiscordUserAuthenticated(interaction.user.id);
         let email = null;
         let tiktokVerified = false;
         let linkedTikTokAccounts = [];
@@ -504,10 +504,10 @@ const handleCommandsCommand = async (interaction) => {
 const handleLinkCommand = async (interaction) => {
     try {
         // Check if user is authenticated
-        const isAuthenticated = await isUserAuthenticated(interaction.user.id);
+        const isAuthenticated = await isDiscordUserAuthenticated(interaction.user.id);
         if (!isAuthenticated) {
             return interaction.reply({ 
-                content: 'You need to authenticate first. Use the /login command.', 
+                content: 'You need to log in first. Use the /login command.', 
                 flags: MessageFlags.Ephemeral
             });
         }

@@ -48,9 +48,9 @@ app.get('/', (req, res) => {
     });
 });
 
-app.get('/link-tiktok-account/:userId', async (req, res) => {
+app.get('/link-tiktok-account/:tiktokUsername', authenticateUser, async (req, res) => {
     try {
-        const { userId } = req.params;
+        const { tiktokUsername } = req.params;
         const { firebaseUserId, token } = req.query;
 
         if (!firebaseUserId || !token) {
@@ -60,7 +60,15 @@ app.get('/link-tiktok-account/:userId', async (req, res) => {
             });
         }
 
-        const result = await linkTikTokAccount(userId, token);
+        // Verify the user is accessing their own data
+        if (firebaseUserId !== req.user.uid) {
+            return res.status(403).json({ 
+                success: false,
+                message: 'Unauthorized. You can only access your own data.' 
+            });
+        }
+
+        const result = await linkTikTokAccount(tiktokUsername, token);
         
         // Return the same response structure as the function
         return res.status(result.success ? 200 : 400).json(result);
@@ -76,14 +84,19 @@ app.get('/link-tiktok-account/:userId', async (req, res) => {
 });
 
 // Token verification endpoint
-app.post('/verify-token', async (req, res) => {
+app.post('/verify-token', authenticateUser, async (req, res) => {
     try {
         const { token, firebaseUserId } = req.body;
 
-        
-        
         if (!token || !firebaseUserId) {
             return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        // Verify the user is accessing their own data
+        if (firebaseUserId !== req.user.uid) {
+            return res.status(403).json({ 
+                error: 'Unauthorized. You can only link your own Discord account.' 
+            });
         }
 
         // Get the token document

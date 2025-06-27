@@ -70,7 +70,7 @@ function sanitizeCampaignId(campaignId) {
 }
 
 // Helper function to check if user is authenticated
-export async function isUserAuthenticated(discordId) {
+export async function isDiscordUserAuthenticated(discordId) {
     try {
         const sanitizedDiscordId = sanitizeDiscordId(discordId);
         const userDoc = await db.collection('users')

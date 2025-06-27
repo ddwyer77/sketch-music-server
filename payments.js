@@ -1,4 +1,4 @@
-import { isUserAdmin, sanitizeCampaignId, isUserAuthenticated, getFirebaseUserId, sanitizeUserId } from './helper.js';
+import { isUserAdmin, sanitizeCampaignId, getFirebaseUserId, sanitizeUserId } from './helper.js';
 import { db, FieldValue } from './firebaseAdmin.js';
 import axios from 'axios';
 
