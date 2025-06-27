@@ -597,6 +597,33 @@ export function verifyUserAccess(req, res, next) {
     next();
 }
 
+// Helper function to verify user has admin or owner role
+export async function verifyAdminOrOwnerRole(req, res, next) {
+    try {
+        const userId = req.user.uid;
+        const userDoc = await db.collection('users').doc(userId).get();
+        
+        if (!userDoc.exists) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        const userData = userDoc.data();
+        const userRoles = userData.roles || [];
+        
+        // Check if user has admin or owner role
+        if (!userRoles.includes('admin') && !userRoles.includes('owner')) {
+            return res.status(403).json({ 
+                error: 'Unauthorized. Admin or owner role required for this operation.' 
+            });
+        }
+        
+        next();
+    } catch (error) {
+        console.error('Error verifying admin/owner role:', error);
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
 // Export sanitization functions for use in other files
 export {
     sanitizeDiscordId,

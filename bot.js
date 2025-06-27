@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { db } from './firebaseAdmin.js';
-import { updateCampaignMetrics, linkTikTokAccount, getUserById, authenticateUser, verifyUserAccess } from './helper.js';
+import { updateCampaignMetrics, linkTikTokAccount, getUserById, authenticateUser, verifyUserAccess, verifyAdminOrOwnerRole } from './helper.js';
 import { payCreator, recordDeposit, releaseCampaignPayments } from './payments.js';
 import { updateActiveCampaigns } from './discordCampaignManager.js';
 import { 
@@ -258,7 +258,7 @@ app.post('/pay-creator', authenticateUser, verifyUserAccess, async (req, res) =>
     }
 });
 
-app.post('/release-campaign-payments', async (req, res) => {
+app.post('/release-campaign-payments', authenticateUser, verifyAdminOrOwnerRole, async (req, res) => {
     try {
         const { campaignId, actorId } = req.body;
    
@@ -287,7 +287,7 @@ app.post('/release-campaign-payments', async (req, res) => {
 });
 
 // Record Deposit
-app.post('/record-deposit', async (req, res) => {
+app.post('/record-deposit', authenticateUser, verifyAdminOrOwnerRole, async (req, res) => {
     try {
         const { actorId, campaignId, amount, paymentMethod = "paypal", paymentReference = null } = req.body;
         
