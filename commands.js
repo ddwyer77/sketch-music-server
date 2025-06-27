@@ -1,6 +1,6 @@
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, MessageFlags, EmbedBuilder } from 'discord.js';
 import 'dotenv/config';
-import { isDiscordUserAuthenticated, getFirebaseUserId, sanitizeDiscordId,sanitizeUrl,sanitizeCampaignId,videoContainsRequiredSound,getTikTokVideoData,linkTikTokAccount } from './helper.js';
+import { isDiscordUserAuthenticated, getFirebaseUserId, sanitizeDiscordId,sanitizeUrl,sanitizeCampaignId,videoContainsRequiredSound,getTikTokVideoData,linkTikTokAccount, isTikTokUrl } from './helper.js';
 import crypto from 'crypto';
 import { db, FieldValue } from './firebaseAdmin.js';
 import { TOKEN_EXPIRY, RATE_LIMIT_WINDOW, MAX_REQUESTS, RATE_LIMIT } from './constants.js';
@@ -111,6 +111,13 @@ const handleSubmitCommand = async (interaction) => {
 
         const campaignId = sanitizeCampaignId(interaction.options.getString('campaign_id'));
         let videoUrl = sanitizeUrl(interaction.options.getString('video_url'));
+
+        // Validate TikTok URL - use editReply since we already deferred
+        if (!isTikTokUrl(videoUrl)) {
+            return interaction.editReply({
+                content: '❌ That doesn\'t look like a valid TikTok URL. Please make sure you\'re sharing a TikTok video link.'
+            });
+        }
 
         // Check for shortened/shareable urls and convert to full length
         if (isShortenedTikTokUrl(videoUrl)) {

@@ -632,4 +632,391 @@ export {
     sanitizeCampaignId,
     sanitizeTikTokId,
     sanitizeUserId
-}; 
+};
+
+/**
+ * Validates if a URL is a legitimate TikTok URL with comprehensive security checks
+ * @param {string} url - The URL to validate
+ * @returns {boolean} - True if valid TikTok URL, false otherwise
+ */
+export function isTikTokUrl(url) {
+    try {
+        // Input validation
+        if (!url || typeof url !== 'string') {
+            return false;
+        }
+
+        // Trim whitespace and check for empty string after trimming
+        const trimmedUrl = url.trim();
+        if (trimmedUrl.length === 0) {
+            return false;
+        }
+
+        // Check for maximum length to prevent DoS attacks
+        if (trimmedUrl.length > 2048) {
+            return false;
+        }
+
+        // Parse the URL to validate structure
+        let parsedUrl;
+        try {
+            parsedUrl = new URL(trimmedUrl);
+        } catch (error) {
+            return false;
+        }
+
+        // Security: Only allow HTTPS and HTTP protocols
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+            return false;
+        }
+
+        // Security: Prevent protocol confusion attacks (e.g., javascript: URLs)
+        if (parsedUrl.protocol === 'http:' && !trimmedUrl.startsWith('http://')) {
+            return false;
+        }
+        if (parsedUrl.protocol === 'https:' && !trimmedUrl.startsWith('https://')) {
+            return false;
+        }
+
+        // Security: Check for null bytes or other dangerous characters
+        if (trimmedUrl.includes('\0') || trimmedUrl.includes('\u0000')) {
+            return false;
+        }
+
+        // Security: Prevent CRLF injection attempts
+        if (trimmedUrl.includes('\r') || trimmedUrl.includes('\n') || trimmedUrl.includes('\r\n')) {
+            return false;
+        }
+
+        // Security: Check for potential SSRF attempts (internal IPs, localhost, etc.)
+        const hostname = parsedUrl.hostname.toLowerCase();
+        const dangerousHosts = [
+            'localhost', '127.0.0.1', '0.0.0.0', '::1', '::ffff:127.0.0.1',
+            '10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', 
+            '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', 
+            '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '192.168.'
+        ];
+        
+        for (const dangerousHost of dangerousHosts) {
+            if (hostname === dangerousHost || hostname.startsWith(dangerousHost)) {
+                return false;
+            }
+        }
+
+        // Security: Check for potential SSRF via IP addresses
+        const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+        if (ipRegex.test(hostname)) {
+            return false;
+        }
+
+        // Define legitimate TikTok domains and their variations
+        const validTikTokDomains = [
+            'tiktok.com',
+            'www.tiktok.com',
+            'm.tiktok.com',
+            'vm.tiktok.com',
+            'vt.tiktok.com',
+            'us.tiktok.com',
+            'uk.tiktok.com',
+            'ca.tiktok.com',
+            'au.tiktok.com',
+            'de.tiktok.com',
+            'fr.tiktok.com',
+            'es.tiktok.com',
+            'it.tiktok.com',
+            'pt.tiktok.com',
+            'nl.tiktok.com',
+            'pl.tiktok.com',
+            'ru.tiktok.com',
+            'tr.tiktok.com',
+            'ar.tiktok.com',
+            'br.tiktok.com',
+            'mx.tiktok.com',
+            'co.tiktok.com',
+            'pe.tiktok.com',
+            'cl.tiktok.com',
+            've.tiktok.com',
+            'ec.tiktok.com',
+            'bo.tiktok.com',
+            'py.tiktok.com',
+            'uy.tiktok.com',
+            'ar.tiktok.com',
+            'ch.tiktok.com',
+            'at.tiktok.com',
+            'be.tiktok.com',
+            'dk.tiktok.com',
+            'fi.tiktok.com',
+            'gr.tiktok.com',
+            'hu.tiktok.com',
+            'ie.tiktok.com',
+            'il.tiktok.com',
+            'jp.tiktok.com',
+            'kr.tiktok.com',
+            'my.tiktok.com',
+            'no.tiktok.com',
+            'nz.tiktok.com',
+            'ph.tiktok.com',
+            'sg.tiktok.com',
+            'se.tiktok.com',
+            'th.tiktok.com',
+            'vn.tiktok.com',
+            'id.tiktok.com',
+            'in.tiktok.com',
+            'pk.tiktok.com',
+            'bd.tiktok.com',
+            'lk.tiktok.com',
+            'np.tiktok.com',
+            'mm.tiktok.com',
+            'kh.tiktok.com',
+            'la.tiktok.com',
+            'mn.tiktok.com',
+            'kz.tiktok.com',
+            'uz.tiktok.com',
+            'kg.tiktok.com',
+            'tj.tiktok.com',
+            'tm.tiktok.com',
+            'af.tiktok.com',
+            'ir.tiktok.com',
+            'iq.tiktok.com',
+            'sa.tiktok.com',
+            'ae.tiktok.com',
+            'qa.tiktok.com',
+            'kw.tiktok.com',
+            'bh.tiktok.com',
+            'om.tiktok.com',
+            'jo.tiktok.com',
+            'lb.tiktok.com',
+            'sy.tiktok.com',
+            'ps.tiktok.com',
+            'eg.tiktok.com',
+            'ly.tiktok.com',
+            'tn.tiktok.com',
+            'dz.tiktok.com',
+            'ma.tiktok.com',
+            'mr.tiktok.com',
+            'ml.tiktok.com',
+            'ne.tiktok.com',
+            'td.tiktok.com',
+            'sd.tiktok.com',
+            'et.tiktok.com',
+            'so.tiktok.com',
+            'dj.tiktok.com',
+            'ke.tiktok.com',
+            'tz.tiktok.com',
+            'ug.tiktok.com',
+            'rw.tiktok.com',
+            'bi.tiktok.com',
+            'mw.tiktok.com',
+            'zm.tiktok.com',
+            'zw.tiktok.com',
+            'na.tiktok.com',
+            'bw.tiktok.com',
+            'ls.tiktok.com',
+            'sz.tiktok.com',
+            'mg.tiktok.com',
+            'mu.tiktok.com',
+            'sc.tiktok.com',
+            'km.tiktok.com',
+            'yt.tiktok.com',
+            're.tiktok.com',
+            'mz.tiktok.com',
+            'ao.tiktok.com',
+            'gw.tiktok.com',
+            'cv.tiktok.com',
+            'gm.tiktok.com',
+            'gn.tiktok.com',
+            'sl.tiktok.com',
+            'lr.tiktok.com',
+            'ci.tiktok.com',
+            'gh.tiktok.com',
+            'tg.tiktok.com',
+            'bj.tiktok.com',
+            'ng.tiktok.com',
+            'cm.tiktok.com',
+            'gq.tiktok.com',
+            'ga.tiktok.com',
+            'cg.tiktok.com',
+            'cd.tiktok.com',
+            'cf.tiktok.com',
+            'st.tiktok.com',
+            'gq.tiktok.com',
+            'ao.tiktok.com',
+            'zm.tiktok.com',
+            'zw.tiktok.com',
+            'na.tiktok.com',
+            'bw.tiktok.com',
+            'ls.tiktok.com',
+            'sz.tiktok.com',
+            'mg.tiktok.com',
+            'mu.tiktok.com',
+            'sc.tiktok.com',
+            'km.tiktok.com',
+            'yt.tiktok.com',
+            're.tiktok.com',
+            'mz.tiktok.com',
+            'ao.tiktok.com',
+            'gw.tiktok.com',
+            'cv.tiktok.com',
+            'gm.tiktok.com',
+            'gn.tiktok.com',
+            'sl.tiktok.com',
+            'lr.tiktok.com',
+            'ci.tiktok.com',
+            'gh.tiktok.com',
+            'tg.tiktok.com',
+            'bj.tiktok.com',
+            'ng.tiktok.com',
+            'cm.tiktok.com',
+            'gq.tiktok.com',
+            'ga.tiktok.com',
+            'cg.tiktok.com',
+            'cd.tiktok.com',
+            'cf.tiktok.com',
+            'st.tiktok.com'
+        ];
+
+        // Check if hostname matches any valid TikTok domain
+        const isTikTokDomain = validTikTokDomains.some(domain => {
+            return hostname === domain || hostname.endsWith('.' + domain);
+        });
+
+        if (!isTikTokDomain) {
+            return false;
+        }
+
+        // Security: Validate path structure for TikTok URLs
+        const pathname = parsedUrl.pathname.toLowerCase();
+        
+        // Define valid TikTok URL patterns
+        const validTikTokPatterns = [
+            // Video URLs
+            /^\/@[a-zA-Z0-9._-]+\/video\/\d+$/,
+            /^\/t\/[a-zA-Z0-9]+$/,
+            /^\/video\/\d+$/,
+            
+            // Photo URLs
+            /^\/@[a-zA-Z0-9._-]+\/photo\/\d+$/,
+            /^\/photo\/\d+$/,
+            
+            // User profile URLs
+            /^\/@[a-zA-Z0-9._-]+$/,
+            /^\/user\/[a-zA-Z0-9._-]+$/,
+            
+            // Hashtag URLs
+            /^\/tag\/[a-zA-Z0-9._-]+$/,
+            /^\/hashtag\/[a-zA-Z0-9._-]+$/,
+            
+            // Music URLs
+            /^\/music\/[a-zA-Z0-9._-]+$/,
+            
+            // Live URLs
+            /^\/@[a-zA-Z0-9._-]+\/live$/,
+            /^\/live\/[a-zA-Z0-9._-]+$/,
+            
+            // Collection URLs
+            /^\/collection\/[a-zA-Z0-9._-]+$/,
+            
+            // Shortened TikTok URLs - various formats
+            /^\/[a-zA-Z0-9]{8,12}\/?$/,                    // vm.tiktok.com/ZNdyJyD4G/
+            /^\/[a-zA-Z0-9]{8,12}$/,                       // vm.tiktok.com/ZNdyJyD4G (no trailing slash)
+            /^\/[a-zA-Z0-9]{8,12}\?.*$/,                   // vm.tiktok.com/ZNdyJyD4G?param=value
+            /^\/[a-zA-Z0-9]{8,12}\/.*$/,                   // vm.tiktok.com/ZNdyJyD4G/extra
+            /^\/[a-zA-Z0-9]{8,12}\?.*\/.*$/,               // vm.tiktok.com/ZNdyJyD4G?param=value/extra
+            
+            // Alternative shortened formats (less common but possible)
+            /^\/[a-zA-Z0-9]{6,15}\/?$/,                    // Allow slightly longer/shorter codes
+            /^\/[a-zA-Z0-9]{6,15}\?.*$/,                   // With query params
+            /^\/[a-zA-Z0-9]{6,15}\/.*$/,                   // With extra path
+            
+            // Root path (for redirects)
+            /^\/$/
+        ];
+
+        // Check if pathname matches any valid pattern
+        const isValidPath = validTikTokPatterns.some(pattern => pattern.test(pathname));
+        
+        if (!isValidPath) {
+            return false;
+        }
+
+        // Security: Validate query parameters (only allow safe ones)
+        const safeQueryParams = [
+            'lang', 'region', 'is_copy_url', 'is_from_webapp', 'sender_device', 
+            'sender_web_id', 'share_app_name', 'share_link_id', 'share_method', 
+            'timestamp', 'tt_from', 'u_code', 'user_id', 'webcast_id', 'msToken',
+            'X-Bogus', '_signature', 'aid', 'app_name', 'channel', 'device_platform',
+            'iid', 'manifest_version_code', 'resolution', 'update_version_code'
+        ];
+
+        const queryParams = Array.from(parsedUrl.searchParams.keys());
+        const hasUnsafeParams = queryParams.some(param => !safeQueryParams.includes(param));
+        
+        if (hasUnsafeParams) {
+            return false;
+        }
+
+        // Security: Check for potential XSS in query parameters
+        const queryString = parsedUrl.search;
+        if (queryString && (
+            queryString.includes('<script') || 
+            queryString.includes('javascript:') || 
+            queryString.includes('data:text/html') ||
+            queryString.includes('vbscript:') ||
+            queryString.includes('onload=') ||
+            queryString.includes('onerror=') ||
+            queryString.includes('onclick=')
+        )) {
+            return false;
+        }
+
+        // Security: Validate fragment (hash) if present
+        if (parsedUrl.hash) {
+            const hash = parsedUrl.hash.toLowerCase();
+            if (hash.includes('<script') || 
+                hash.includes('javascript:') || 
+                hash.includes('data:text/html') ||
+                hash.includes('vbscript:') ||
+                hash.includes('onload=') ||
+                hash.includes('onerror=') ||
+                hash.includes('onclick=')) {
+                return false;
+            }
+        }
+
+        // Security: Check for URL encoding attacks
+        const decodedUrl = decodeURIComponent(trimmedUrl);
+        if (decodedUrl !== trimmedUrl && (
+            decodedUrl.includes('<script') || 
+            decodedUrl.includes('javascript:') || 
+            decodedUrl.includes('data:text/html') ||
+            decodedUrl.includes('vbscript:') ||
+            decodedUrl.includes('onload=') ||
+            decodedUrl.includes('onerror=') ||
+            decodedUrl.includes('onclick=')
+        )) {
+            return false;
+        }
+
+        // Security: Check for double encoding attacks
+        const doubleDecodedUrl = decodeURIComponent(decodeURIComponent(trimmedUrl));
+        if (doubleDecodedUrl !== trimmedUrl && (
+            doubleDecodedUrl.includes('<script') || 
+            doubleDecodedUrl.includes('javascript:') || 
+            doubleDecodedUrl.includes('data:text/html') ||
+            doubleDecodedUrl.includes('vbscript:') ||
+            doubleDecodedUrl.includes('onload=') ||
+            doubleDecodedUrl.includes('onerror=') ||
+            doubleDecodedUrl.includes('onclick=')
+        )) {
+            return false;
+        }
+
+        // If all checks pass, it's a valid TikTok URL
+        return true;
+
+    } catch (error) {
+        // If any error occurs during validation, reject the URL
+        console.error('Error validating TikTok URL:', error);
+        return false;
+    }
+} 
