@@ -950,7 +950,7 @@ export function isTikTokUrl(url) {
             'preview_pb', 'sec_user_id', 'share_app_id', 'share_item_id', 'share_scene',
             'sharer_language', 'social_share_type', 'source', 'ug_btm', 'ug_photo_idx',
             'utm_campaign', 'utm_medium', 'utm_source', 'from_page', 'refer', 'referer',
-            'enter_from', 'enter_method', 'is_from_share', 'checksum_pl'
+            'enter_from', 'enter_method', 'is_from_share', 'checksum_pl', 'mid'
         ];
 
         const queryParams = Array.from(parsedUrl.searchParams.keys());
