@@ -110,8 +110,8 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function getTikTokVideoData(url) {
   try {
-    // Check if it's a shortened URL - updated to handle both /t/ and vt.tiktok.com formats
-    if (url.includes('/t/') || url.includes('vt.tiktok.com')) {
+    // Check if it's a shortened URL - updated to handle /t/, vt.tiktok.com, and vm.tiktok.com formats
+    if (url.includes('/t/') || url.includes('vt.tiktok.com') || url.includes('vm.tiktok.com')) {
       try {
         // Follow the redirect to get the full URL
         const response = await axios({
