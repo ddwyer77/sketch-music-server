@@ -132,9 +132,7 @@ app.post('/verify-token', authenticateUser, async (req, res) => {
 // Update active campaigns endpoint
 app.post('/api/discord/update-active-campaigns', async (req, res) => {
     try {
-        console.log("Starting update-active-campaigns request");
         const result = await updateActiveCampaigns(client);
-        console.log("Update active campaigns result:", result);
         res.status(200).json(result);
     } catch (error) {
         console.error('Error in update-active-campaigns endpoint:', error);
@@ -145,13 +143,20 @@ app.post('/api/discord/update-active-campaigns', async (req, res) => {
     }
 });
 
-// Add API endpoint to update all campaign metrics
 app.post('/api/update-metrics', async (req, res) => {
     try {
         // Handle case where req.body is undefined
         const campaignIds = req.body?.campaignIds;
         const result = await updateCampaignMetrics(campaignIds || null);
-        console.log("Campaign Metrics Successfully Updated")
+        
+        // Update Discord channels with fresh data if client is ready
+        if (client.isReady()) {
+            await updateActiveCampaigns(client);
+            console.log('Discord channel updates completed after metrics update.');
+        } else {
+            console.log('Discord client not ready, skipping channel updates');
+        }
+        
         res.status(200).json(result);
     } catch (error) {
         console.error('Error updating campaign metrics:', error);
