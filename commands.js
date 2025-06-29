@@ -182,7 +182,7 @@ const handleSubmitCommand = async (interaction) => {
 
         // Check for duplicate submissions
         const existingVideos = campaignData.videos || [];
-        const isDuplicate = existingVideos.some(video => video.url === videoUrl);
+        const isDuplicate = existingVideos.some(video => video.id === videoData.id || video.url === videoUrl);
         
         if (isDuplicate) {
             const errorEmbed = new EmbedBuilder()
