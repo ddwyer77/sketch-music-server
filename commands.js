@@ -334,7 +334,7 @@ const handleCampaignsCommand = async (interaction) => {
         .collection('campaigns')
         .where('serverIds', 'array-contains', serverId)
         .where('isComplete', '==', false)
-        .limit(10)
+        .limit(20)
         .get();
 
     if (campaignsSnapshot.empty) {
